@@ -1,0 +1,18 @@
+Metadatos: {
+     Titulo, Subtitulo, Idioma, Autoría, Licencia
+}
+Paginas / subpáginas
+Información de la tarea { Duracion, participantes}
+
+Texto { Información de la tarea, Texto, Retroalimentación}
+
+Caso práctico { Información de la tarea, Historia: {Texto}, Actividades: { Texto,Retroalimentación}}
+
+Descarga fuente { Texto, Enlace }
+
+Web-externa { Enlace }
+
+Galería de imagenes { Imagenes }
+
+Lupa { Texto, Imagen, ancho, alineacion, aumento, tamaño-lupa }
+

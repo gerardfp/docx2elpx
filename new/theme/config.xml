@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<theme>
+ <name>Escola</name>
+    <title>Escola</title>
+    <version>2026</version>
+    <compatibility>3.0</compatibility>
+    <author>Escola 4.0, SDGFP, GVA</author>
+    <license>Creative Commons by-sa</license>
+    <license-url>http://creativecommons.org/licenses/by-sa/3.0/</license-url>
+    <description>Based on CEFIRE de creación de recursos, SDGFP, GVA and an Example style for eXeLearning 3.iDevice icons by Francisco Javier Pulido Cuadrado. Navigation icons by Google (https://fonts.google.com/icons), under the 2.0 version of the Apache License (https://www.apache.org/licenses/LICENSE-2.0.html). Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.</description>
+  <downloadable>1</downloadable>
+</theme>

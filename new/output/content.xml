@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ode xmlns="http://www.intef.es/xsd/ode" version="2.0">
+    <userPreferences>
+        <userPreference><key>theme</key><value>theme</value></userPreference>
+    </userPreferences>
+    <odeResources>
+        <odeResource><key>odeVersionId</key><value>20260318125044IWLZCK</value></odeResource>
+        <odeResource><key>odeId</key><value>20260318125044DGHCOV</value></odeResource>
+        <odeResource><key>odeVersionName</key><value>0</value></odeResource>
+        <odeResource><key>isDownload</key><value>true</value></odeResource>
+        <odeResource><key>eXeVersion</key><value>v3.0.2</value></odeResource>
+    </odeResources>
+    <odeProperties>
+        <odeProperty><key>pp_title</key><value>Package Title</value></odeProperty>
+        <odeProperty><key>pp_subtitle</key><value></value></odeProperty>
+        <odeProperty><key>pp_lang</key><value>va</value></odeProperty>
+        <odeProperty><key>pp_author</key><value>Autor del recurs</value></odeProperty>
+        <odeProperty><key>license</key><value>creative commons: attribution - share alike 4.0</value></odeProperty>
+        <odeProperty><key>pp_description</key><value></value></odeProperty>
+        <odeProperty><key>exportSource</key><value>true</value></odeProperty>
+        <odeProperty><key>pp_addExeLink</key><value>true</value></odeProperty>
+        <odeProperty><key>pp_addPagination</key><value>false</value></odeProperty>
+        <odeProperty><key>pp_addSearchBox</key><value>false</value></odeProperty>
+        <odeProperty><key>pp_addAccessibilityToolbar</key><value>false</value></odeProperty>
+        <odeProperty><key>pp_extraHeadContent</key><value></value></odeProperty>
+        <odeProperty><key>footer</key><value></value></odeProperty>
+    </odeProperties>
+    <odeNavStructures>
+        <odeNavStructure>
+            <odePageId>20260318125043HHQUIB</odePageId>
+            <odeParentPageId></odeParentPageId>
+            <pageName>Portada</pageName>
+            <odeNavStructureOrder>1</odeNavStructureOrder>
+            <odeNavStructureProperties>
+                <odeNavStructureProperty><key>titlePage</key><value>Portada</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>titleNode</key><value>Portada</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>hidePageTitle</key><value>false</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>titleHtml</key><value></value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>editableInPage</key><value>false</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>visibility</key><value>true</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>highlight</key><value>false</value></odeNavStructureProperty>
+                <odeNavStructureProperty><key>description</key><value></value></odeNavStructureProperty>
+            </odeNavStructureProperties>
+            <odePagStructures>
+                <odePagStructure>
+                    <odePageId>20260318125043HHQUIB</odePageId>
+                    <odeBlockId>20260318125043YSWBJW</odeBlockId>
+                    <blockName> </blockName>
+                    <iconName></iconName>
+                    <odePagStructureOrder>1</odePagStructureOrder>
+                    <odePagStructureProperties>
+                        <odePagStructureProperty><key>visibility</key><value>true</value></odePagStructureProperty>
+                        <odePagStructureProperty><key>teacherOnly</key><value>false</value></odePagStructureProperty>
+                        <odePagStructureProperty><key>allowToggle</key><value>true</value></odePagStructureProperty>
+                        <odePagStructureProperty><key>minimized</key><value>false</value></odePagStructureProperty>
+                        <odePagStructureProperty><key>identifier</key><value></value></odePagStructureProperty>
+                        <odePagStructureProperty><key>cssClass</key><value></value></odePagStructureProperty>
+                    </odePagStructureProperties>
+                    <odeComponents>
+                        <odeComponent>
+                            <odePageId>20260318125043HHQUIB</odePageId>
+                            <odeBlockId>20260318125043YSWBJW</odeBlockId>
+                            <odeIdeviceId>20260318125043RZLHYS</odeIdeviceId>
+                            <odeIdeviceTypeName>text</odeIdeviceTypeName>
+                            <htmlView>&lt;div class=&quot;exe-text-template&quot;&gt;&lt;div class=&quot;textIdeviceContent&quot;&gt;&lt;div class=&quot;exe-text-activity&quot;&gt;&lt;div&gt;&lt;div class=&quot;exe-fx exe-accordion&quot;&gt;&lt;h2&gt;Titulo 1 del acordeón&lt;/h2&gt;&lt;p&gt;Contenido 1 del acordeón&lt;/p&gt;&lt;h2&gt;Titulo 2 del acordeón&lt;/h2&gt;&lt;p&gt;Contenido 2 del acordeón&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;</htmlView>
+                            <jsonProperties>{&quot;ideviceId&quot;: &quot;20260318125043RZLHYS&quot;, &quot;textInfoDurationInput&quot;: &quot;&quot;, &quot;textInfoDurationTextInput&quot;: &quot;Duraci\u00f3n&quot;, &quot;textInfoParticipantsInput&quot;: &quot;&quot;, &quot;textInfoParticipantsTextInput&quot;: &quot;Agrupamiento&quot;, &quot;textTextarea&quot;: &quot;&lt;div class=\&quot;exe-fx exe-accordion\&quot;&gt;&lt;h2&gt;Titulo 1 del acorde\u00f3n&lt;/h2&gt;&lt;p&gt;Contenido 1 del acorde\u00f3n&lt;/p&gt;&lt;h2&gt;Titulo 2 del acorde\u00f3n&lt;/h2&gt;&lt;p&gt;Contenido 2 del acorde\u00f3n&lt;/p&gt;&lt;/div&gt;&quot;, &quot;textFeedbackInput&quot;: &quot;Mostra la retroacci\u00f3&quot;, &quot;textFeedbackTextarea&quot;: &quot;&quot;}</jsonProperties>
+                            <odeComponentsOrder>1</odeComponentsOrder>
+                            <odeComponentsProperties>
+                                <odeComponentsProperty><key>visibility</key><value>true</value></odeComponentsProperty>
+                                <odeComponentsProperty><key>teacherOnly</key><value>false</value></odeComponentsProperty>
+                                <odeComponentsProperty><key>identifier</key><value></value></odeComponentsProperty>
+                                <odeComponentsProperty><key>cssClass</key><value></value></odeComponentsProperty>
+                            </odeComponentsProperties>
+                        </odeComponent>
+                    </odeComponents>
+                </odePagStructure>
+            </odePagStructures>
+        </odeNavStructure>
+    </odeNavStructures>
+</ode>

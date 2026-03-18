@@ -1,0 +1,8 @@
+Element: p, Text: [{acordeon}]
+Match: START ACCORDION
+Element: p, Text: [>> Titulo 1 del acordeón]
+Element: p, Text: [Contenido 1 del acordeón]
+Element: p, Text: [>> Titulo 2 del acordeón]
+Element: p, Text: [Contenido 2 del acordeón]
+Element: p, Text: [{fin acordeon}]
+Match: END ACCORDION
