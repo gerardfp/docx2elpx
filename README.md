@@ -23,23 +23,35 @@ En los metadatos}
 * Páginas / subpáginas
 ```
 # Titulo de la página
+
+Contenido
+
 ## Titulo de la subpágina
+
+Contenido
+
 ### Titulo de la subsubpágina
+
+Contenido
 ```
 
 * Idevice Text
 ```
-% bloque te de texto
+% bloque de texto
 {hora: 1:00}
 {individual: 3}
+
+Contenido
 ```
 
 * Lightbox
 ```
 {lightbox}
+
+Imagen
 ```
 
-* Acordeón
+* Acordeón, Pestañas, Paginación, Carrusel
 
 ```
 {acordeon}
@@ -47,5 +59,5 @@ En los metadatos}
 Contenido 1 del acordeón
 >> Titulo 2 del acordeón
 Contenido 2 del acordeón
-{fin acordeon}
+{fin}
 ```
