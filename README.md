@@ -1,4 +1,13 @@
-# Metadatos
+# Generación de ODE (Objeto Digital Educativo) 
+```
+Objeto Digital Educativo
+└── páginas
+└── actividades (iDevices)
+└── recursos multimedia
+└── metadatos
+```
+
+## Metadatos
 ```
 {titulo: Este sería el título principal en los metadatos}
 {subtitulo: Este sería el subtítulo principal en los metadatos}

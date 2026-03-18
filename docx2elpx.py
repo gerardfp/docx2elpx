@@ -440,120 +440,130 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
     body = soup.find("body")
     elements = body.contents if body else soup.contents
     
-    with open("tmp_debug.txt", "w", encoding="utf-8") as debug_file:
-        for element in elements:
-            if not element.name:
-                if not current_page and not collecting_description:
-                    continue  # Skip whitespace before any page
-                if collecting_accordion:
-                    accordion_elements.append(element)
-                else:
-                    section_elements.append(element)
-                continue
-                
-            text = element.get_text().strip()
-            debug_file.write(f"Element: {element.name}, Text: [{text}]\n")
-            
-            # Handle multi-line description continuation
-            if collecting_description:
-                # Check if this line ends the description with }
-                if text.endswith("}"):
-                    doc_metadata["pp_description"] += "\n" + text[:-1].rstrip()
-                    collecting_description = False
-                else:
-                    doc_metadata["pp_description"] += "\n" + text
-                continue
-
-            # Handle accordion block
-            # More permissive matching for {acordeon}
-            if re.search(r"\{acorde[oó]n\}", text, re.I):
-                collecting_accordion = True
-                accordion_elements = []
-                debug_file.write("Match: START ACCORDION\n")
-                continue
-            
-            if re.search(r"\{fin\s+acorde[oó]n\}", text, re.I):
-                if collecting_accordion:
-                    debug_file.write("Match: END ACCORDION\n")
-                    accordion_div = soup.new_tag("div", attrs={"class": "exe-fx exe-accordion"})
-                    for acc_el in accordion_elements:
-                        if not acc_el.name: 
-                            accordion_div.append(copy.deepcopy(acc_el))
-                            continue
-                        el_text = acc_el.get_text().strip()
-                        # Match ">> Title", "> > Title", etc.
-                        if (acc_el.name.startswith("h") or acc_el.name == "p") and re.match(r"^>\s*>\s*.+", el_text):
-                            h2 = soup.new_tag("h2")
-                            # Strip the >> and any leading/trailing spaces
-                            h2.string = re.sub(r"^>\s*>\s*", "", el_text).strip()
-                            accordion_div.append(h2)
-                        else:
-                            accordion_div.append(copy.deepcopy(acc_el))
-                    section_elements.append(accordion_div)
-                    collecting_accordion = False
-                    accordion_elements = []
-                continue
-                
+    for element in elements:
+        if not element.name:
+            if not current_page and not collecting_description:
+                continue  # Skip whitespace before any page
             if collecting_accordion:
                 accordion_elements.append(element)
-                continue
+            else:
+                section_elements.append(element)
+            continue
+            
+        text = element.get_text().strip()
         
-            page_match = page_marker_regex.match(text)
-            if page_match:
-                # If this is the first real marker and we were using a default page with no content, 
-                # replace the default page.
-                if is_default_page_active and not any(s["content"] for s in default_page.sections) and not section_elements:
-                    pages.remove(default_page)
-                    existing_slugs.discard(default_page.slug)
-                
-                flush_section()
-                is_default_page_active = False # Found a real marker
-                level = len(page_match.group(1))
-                title = page_match.group(2).strip()
-                new_page = Page(title, level, existing_slugs)
-                if not pages: new_page.filename = "index.html"
-                pages.append(new_page)
-                current_page = new_page
-                continue
-                
-            section_match = section_marker_regex.match(text)
-            if section_match:
-                flush_section()
-                section_title = section_match.group(1).strip()
-                if current_page: current_page.add_section(section_title)
-                continue
+        # Handle multi-line description continuation
+        if collecting_description:
+            # Check if this line ends the description with }
+            if text.endswith("}"):
+                doc_metadata["pp_description"] += "\n" + text[:-1].rstrip()
+                collecting_description = False
+            else:
+                doc_metadata["pp_description"] += "\n" + text
+            continue
 
-            # Check for metadata (both document-level and section-level)
-            metadata_match = metadata_regex.match(text)
-            if metadata_match:
-                key = metadata_match.group(1).strip()
-                value = metadata_match.group(2).strip()
+        # Handle FX blocks (accordion, tabs, pagination, carousel)
+        fx_map = {
+            "acordeon": "exe-accordion",
+            "pestañas": "exe-tabs",
+            "pestanas": "exe-tabs",
+            "paginacion": "exe-paginated",
+            "paginacio": "exe-paginated",
+            "carrusel": "exe-carousel"
+        }
+        
+        # Check for any FX starting tag
+        fx_start_match = re.search(r"\{(acorde[oó]n|pesta[ñn]as|paginaci[oó]n?|carrusel)\}", text, re.I)
+        if fx_start_match:
+            fx_type_raw = fx_start_match.group(1).lower()
+            # Normalize key for mapping (remove accents for the map key if needed)
+            norm_key = normalize('NFKD', fx_type_raw).encode('ASCII', 'ignore').decode('ASCII')
+            current_fx_class = fx_map.get(norm_key, fx_map.get(fx_type_raw, "exe-accordion"))
+            collecting_accordion = True # Reuse the flag for any FX
+            accordion_elements = []
+            continue
+        
+        # Unified {fin} tag
+        if re.search(r"\{fin(\s+\w+)?\}", text, re.I):
+            if collecting_accordion:
+                fx_class = current_fx_class if 'current_fx_class' in locals() else "exe-accordion"
+                fx_div = soup.new_tag("div", attrs={"class": f"exe-fx {fx_class}"})
+                for acc_el in accordion_elements:
+                    if not acc_el.name: 
+                        fx_div.append(copy.deepcopy(acc_el))
+                        continue
+                    el_text = acc_el.get_text().strip()
+                    if (acc_el.name.startswith("h") or acc_el.name == "p") and re.match(r"^>\s*>\s*.+", el_text):
+                        h2 = soup.new_tag("h2")
+                        h2.string = re.sub(r"^>\s*>\s*", "", el_text).strip()
+                        fx_div.append(h2)
+                    else:
+                        fx_div.append(copy.deepcopy(acc_el))
+                section_elements.append(fx_div)
+                collecting_accordion = False
+                accordion_elements = []
+            continue
+            
+        if collecting_accordion:
+            accordion_elements.append(element)
+            continue
+    
+        page_match = page_marker_regex.match(text)
+        if page_match:
+            # If this is the first real marker and we were using a default page with no content, 
+            # replace the default page.
+            if is_default_page_active and not any(s["content"] for s in default_page.sections) and not section_elements:
+                pages.remove(default_page)
+                existing_slugs.discard(default_page.slug)
+            
+            flush_section()
+            is_default_page_active = False # Found a real marker
+            level = len(page_match.group(1))
+            title = page_match.group(2).strip()
+            new_page = Page(title, level, existing_slugs)
+            if not pages: new_page.filename = "index.html"
+            pages.append(new_page)
+            current_page = new_page
+            continue
+            
+        section_match = section_marker_regex.match(text)
+        if section_match:
+            flush_section()
+            section_title = section_match.group(1).strip()
+            if current_page: current_page.add_section(section_title)
+            continue
+
+        # Check for metadata (both document-level and section-level)
+        metadata_match = metadata_regex.match(text)
+        if metadata_match:
+            key = metadata_match.group(1).strip()
+            value = metadata_match.group(2).strip()
+            prop_key = DOC_METADATA_KEYS.get(key.lower())
+            
+            if prop_key and not current_page:
+                # Document-level metadata (before any # page marker)
+                if prop_key == "pp_lang":
+                    value = LANGUAGE_MAP.get(value.lower(), value)
+                doc_metadata[prop_key] = value
+            elif current_page:
+                # Section-level metadata (duration/participants)
+                current_page.add_metadata(key, value)
+            continue
+        
+        # Check for multi-line metadata opening (no closing brace)
+        if not current_page:
+            metadata_open_match = metadata_open_regex.match(text)
+            if metadata_open_match:
+                key = metadata_open_match.group(1).strip()
+                value = metadata_open_match.group(2).strip()
                 prop_key = DOC_METADATA_KEYS.get(key.lower())
-                
-                if prop_key and not current_page:
-                    # Document-level metadata (before any # page marker)
-                    if prop_key == "pp_lang":
-                        value = LANGUAGE_MAP.get(value.lower(), value)
+                if prop_key:
                     doc_metadata[prop_key] = value
-                elif current_page:
-                    # Section-level metadata (duration/participants)
-                    current_page.add_metadata(key, value)
+                    collecting_description = True
                 continue
             
-            # Check for multi-line metadata opening (no closing brace)
-            if not current_page:
-                metadata_open_match = metadata_open_regex.match(text)
-                if metadata_open_match:
-                    key = metadata_open_match.group(1).strip()
-                    value = metadata_open_match.group(2).strip()
-                    prop_key = DOC_METADATA_KEYS.get(key.lower())
-                    if prop_key:
-                        doc_metadata[prop_key] = value
-                        collecting_description = True
-                    continue
-                
-            if current_page:
-                section_elements.append(element)
+        if current_page:
+            section_elements.append(element)
 
     flush_section()
 
