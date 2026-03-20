@@ -61,3 +61,19 @@ Contenido 1 del acordeón
 Contenido 2 del acordeón
 {fin}
 ```
+
+
+
+# Estructura HTML
+
+```
+<main class="page">
+  <article class="box">
+    <div class="box-content">
+      <div class="idevice_node">
+        "IDEVICE CONTENT"
+      </div>
+    </div>
+  </article>
+</main>
+```

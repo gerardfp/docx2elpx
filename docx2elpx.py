@@ -51,7 +51,7 @@ def resource_path(relative_path):
     return base_path / relative_path
 
 BASE_DIR = Path(__file__).resolve().parent
-SDA_TEMPLATE_DIR = resource_path("template")
+TEMPLATE_DIR = resource_path("template")
 CURRENT_OUT_PATH = None
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_ROOT = BASE_DIR / "output"
@@ -770,8 +770,10 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
 
 def create_exelearning_package(pages, output_root, target_update, doc_metadata=None, theme_path=None, theme_name="base"):
     """Creates the folder structure and generates all HTML files. Optimized for speed."""
-    if not SDA_TEMPLATE_DIR.exists():
-        print(f"Error: Template directory 'template' not found at {SDA_TEMPLATE_DIR}")
+
+    # Remove this check, as template directory will always exist
+    if not TEMPLATE_DIR.exists():
+        print(f"Error: Template directory 'template' not found at {TEMPLATE_DIR}")
         return
 
     # If a custom theme is provided, copy it over the template theme
@@ -779,7 +781,7 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
         shutil.copytree(theme_path, output_root / "theme", dirs_exist_ok=True)
 
     # 1. Pre-parse template and cache common elements
-    with open(SDA_TEMPLATE_DIR / "index.html", "r", encoding="utf-8") as f:
+    with open(TEMPLATE_DIR / "index.html", "r", encoding="utf-8") as f:
         soup_template = BeautifulSoup(f.read(), BEST_PARSER)
     
     package_title_tag = soup_template.find("h1", class_="package-title")
@@ -935,12 +937,13 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
 def prepare_output(output_root):
     """Initializes output directory with template assets."""
     output_root.mkdir(parents=True, exist_ok=True)
-    if not SDA_TEMPLATE_DIR.exists():
-        print(f"[Warning] Template dir not found at {SDA_TEMPLATE_DIR}")
+    # Remove this check, as template directory will always exist
+    if not TEMPLATE_DIR.exists():
+        print(f"[Warning] Template dir not found at {TEMPLATE_DIR}")
         return
 
     for folder in ["libs", "theme", "idevices", "content", "custom"]:
-        src = SDA_TEMPLATE_DIR / folder
+        src = TEMPLATE_DIR / folder
         dst = output_root / folder
         if src.exists():
             # Copy if missing or merge if exists
@@ -950,6 +953,7 @@ def prepare_output(output_root):
 
 def run_conversion(docx_path, input_dir, output_root):
     """Full conversion flow. Optimized and instrumented."""
+    # remove this check as it has been checked before function call
     if docx_path.exists():
         start_time = time.time()
         timestamp_str = datetime.now().strftime("%H:%M:%S")
@@ -1042,6 +1046,7 @@ def download_elpx():
 
 @app.route("/<path:path>")
 def serve_static(path):
+    # remove this check as CURRENT_OUT_PATH is set at the beginning
     if CURRENT_OUT_PATH is None:
         return "Error", 500
     full_path = CURRENT_OUT_PATH / path
