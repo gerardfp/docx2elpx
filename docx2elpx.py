@@ -15,6 +15,7 @@ import threading
 import copy
 import io
 import zipfile
+
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import filedialog
@@ -72,11 +73,9 @@ def extract_theme_name(theme_path):
     if not config_path.exists():
         return theme_path.name
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            soup = BeautifulSoup(f.read(), "xml")
-            name_tag = soup.find("name")
-            if name_tag:
-                return name_tag.get_text().strip()
+        name_tag = BeautifulSoup(config_path.read_text(encoding="utf-8"), "xml").find("name")
+        if name_tag:
+            return name_tag.get_text().strip()
     except Exception:
         pass
     return theme_path.name
@@ -139,17 +138,14 @@ class Page:
 
 def process_links(soup, input_dir, output_root, section_id):
     """Processes links and YouTube embeds in-place on a BeautifulSoup object."""
-    # 1. YouTube
-    yt_regex = re.compile(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+))')
     for a in soup.find_all('a', href=True):
         href = a['href']
-        yt_match = yt_regex.search(href)
+        yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+))', href)
         if yt_match:
             video_id = yt_match.group(2)
-            # Create eXeLearning style video embed
             video_container = soup.new_tag("div", **{"class": "exe-video-wrapper exe-video-center exe-video-fixed", "style": "width:560px;"})
             iframe = soup.new_tag("iframe", **{
-                "width": "560", "height": "315", "src": f"https://www.youtube.com/embed/{video_id}",
+                "width": "560", "height": "315", "src": f"https://www.youtube.com/embed/{yt_match.group(2)}",
                 "frameborder": "0", "allowfullscreen": "allowfullscreen"
             })
             video_container.append(iframe)
@@ -228,17 +224,12 @@ def process_lightboxes(soup):
             
             if not is_wrapped:
                 # Wrap the image in an <a> tag with lightbox attributes
-                a_tag = soup.new_tag("a", href=next_img['src'], rel="lightbox",
-                                     id=f"link_{link_counter}")
+                next_img.wrap(soup.new_tag("a", href=next_img['src'], rel="lightbox", id=f"link_{link_counter}"))
                 link_counter += 1
-                next_img.wrap(a_tag)
-                current = a_tag  # for clearfix below
 
             # Add <p class="clearfix"></p> after the lightbox wrapper's parent <p>
-            lightbox_p = next_img.find_parent("p")
-            if lightbox_p:
-                clearfix_p = soup.new_tag("p", **{"class": "clearfix"})
-                lightbox_p.insert_after(clearfix_p)
+            if next_img.find_parent("p"):
+                next_img.find_parent("p").insert_after(soup.new_tag("p", **{"class": "clearfix"}))
 
     return soup
 
@@ -274,19 +265,14 @@ def process_content_resources(soup, output_root, section_id):
             continue
 
         # Create _1 duplicate for original/full-size (lightbox href)
-        name_base, ext = os.path.splitext(file_name)
-        original_name = f"{name_base}_1{ext}"
+        original_name = f"{os.path.splitext(file_name)[0]}_1{os.path.splitext(file_name)[1]}"
         resource_folder.mkdir(parents=True, exist_ok=True)
         src_file = resource_folder / file_name
         dst_file = resource_folder / original_name
         if src_file.exists() and not dst_file.exists():
             shutil.copy2(src_file, dst_file)
         
-        # Calculate file size for title/size attributes
-        file_size_str = ""
-        if dst_file.exists():
-            size_bytes = dst_file.stat().st_size
-            file_size_str = f"{size_bytes / 1024:.2f} KB"
+        file_size_str = f"{dst_file.stat().st_size / 1024:.2f} KB" if dst_file.exists() else ""
         
         # Update href to point to the _1 original copy
         a["href"] = f"{{REL_PREFIX}}content/resources/{section_id}/{original_name}"
@@ -338,8 +324,7 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
     def convert_image(image):
         nonlocal image_count
         image_count += 1
-        extension = image.content_type.partition("/")[2]
-        file_name = f"image_{image_count}.{extension}"
+        file_name = f"image_{image_count}.{image.content_type.partition("/")[2]}"
         
         with image.open() as image_bytes:
             with open(images_folder / file_name, "wb") as f:
@@ -358,9 +343,9 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
 
     try:
         with open(temp_docx, "rb") as docx_file:
-            result = mammoth.convert_to_html(docx_file, convert_image=mammoth.images.img_element(convert_image))
-            full_html = result.value
+            full_html = mammoth.convert_to_html(docx_file, convert_image=mammoth.images.img_element(convert_image)).value
     finally:
+        # consider this temp_docx.unlink(missing_ok=True)
         if temp_docx.exists():
             try: os.remove(temp_docx)
             except: pass
@@ -382,9 +367,6 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
     # Multi-line metadata: opening line without closing brace
     metadata_open_regex = re.compile(r"^\{(.+?):\s*(.+)$")
 
-    section_elements = []
-
-    # Initial section
     section_elements = []
 
     def flush_section():
@@ -494,9 +476,7 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
             
             flush_section()
             is_default_page_active = False # Found a real marker
-            level = len(page_match.group(1))
-            title = page_match.group(2).strip()
-            new_page = Page(title, level, existing_slugs)
+            new_page = Page(page_match.group(2).strip(), len(page_match.group(1)), existing_slugs)
             if not pages: new_page.filename = "index.html"
             pages.append(new_page)
             current_page = new_page
@@ -505,8 +485,7 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
         section_match = section_marker_regex.match(text)
         if section_match:
             flush_section()
-            section_title = section_match.group(1).strip()
-            if current_page: current_page.add_section(section_title)
+            if current_page: current_page.add_section(section_match.group(1).strip())
             continue
 
         # Check for metadata (both document-level and section-level)
@@ -599,36 +578,25 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
     if doc_metadata is None:
         doc_metadata = {}
     
-    proj_id = generate_id()
-    version_id = generate_id()
-    
-    # Use doc_metadata values if available, otherwise use defaults
-    title = html.escape(doc_metadata.get("pp_title", package_title))
-    subtitle = html.escape(doc_metadata.get("pp_subtitle", ""))
-    lang = html.escape(doc_metadata.get("pp_lang", "va"))
-    author = html.escape(doc_metadata.get("pp_author", "Autor del recurs"))
-    license_val = html.escape(doc_metadata.get("license", "creative commons: attribution - share alike 4.0"))
-    desc = html.escape(doc_metadata.get("pp_description", description))
-    
     xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <ode xmlns="http://www.intef.es/xsd/ode" version="2.0">
     <userPreferences>
         <userPreference><key>theme</key><value>{html.escape(theme_name)}</value></userPreference>
     </userPreferences>
     <odeResources>
-        <odeResource><key>odeVersionId</key><value>{version_id}</value></odeResource>
-        <odeResource><key>odeId</key><value>{proj_id}</value></odeResource>
+        <odeResource><key>odeVersionId</key><value>{generate_id()}</value></odeResource>
+        <odeResource><key>odeId</key><value>{generate_id()}</value></odeResource>
         <odeResource><key>odeVersionName</key><value>0</value></odeResource>
         <odeResource><key>isDownload</key><value>true</value></odeResource>
         <odeResource><key>eXeVersion</key><value>v3.0.2</value></odeResource>
     </odeResources>
     <odeProperties>
-        <odeProperty><key>pp_title</key><value>{title}</value></odeProperty>
-        <odeProperty><key>pp_subtitle</key><value>{subtitle}</value></odeProperty>
-        <odeProperty><key>pp_lang</key><value>{lang}</value></odeProperty>
-        <odeProperty><key>pp_author</key><value>{author}</value></odeProperty>
-        <odeProperty><key>license</key><value>{license_val}</value></odeProperty>
-        <odeProperty><key>pp_description</key><value>{desc}</value></odeProperty>
+        <odeProperty><key>pp_title</key><value>{html.escape(doc_metadata.get("pp_title", package_title))}</value></odeProperty>
+        <odeProperty><key>pp_subtitle</key><value>{html.escape(doc_metadata.get("pp_subtitle", ""))}</value></odeProperty>
+        <odeProperty><key>pp_lang</key><value>{html.escape(doc_metadata.get("pp_lang", "va"))}</value></odeProperty>
+        <odeProperty><key>pp_author</key><value>{html.escape(doc_metadata.get("pp_author", "Autor del recurs"))}</value></odeProperty>
+        <odeProperty><key>license</key><value>{html.escape(doc_metadata.get("license", "creative commons: attribution - share alike 4.0"))}</value></odeProperty>
+        <odeProperty><key>pp_description</key><value>{html.escape(doc_metadata.get("pp_description", description))}</value></odeProperty>
         <odeProperty><key>exportSource</key><value>true</value></odeProperty>
         <odeProperty><key>pp_addExeLink</key><value>true</value></odeProperty>
         <odeProperty><key>pp_addPagination</key><value>false</value></odeProperty>
@@ -660,9 +628,7 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
             <odePagStructures>
 """
         for j, section in enumerate(page.sections, 1):
-            block_name = html.escape(section["title"]) if section["title"] else " "
-            icon = ""
-            if any(k in block_name.lower() for k in ["reto", "objetivos", "mision"]): icon = "objectives"
+            icon = "objectives" if any(k in (section["title"] or "").lower() for k in ["reto", "objetivos", "mision"]) else ""
             
             # Prepare content for XML: transform resource paths to {{context_path}}
             xml_content = section["content"].replace("{REL_PREFIX}content/resources/", f"{{{{context_path}}}}/")
@@ -670,44 +636,18 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
 
             # Build metadata <dl> block if present
             dl_block = ""
-            duration_label = section["metadata_duration_label"]
-            duration_value = section["metadata_duration_value"]
-            participants_label = section["metadata_participants_label"]
-            participants_value = section["metadata_participants_value"]
-            
-            if duration_label or participants_label:
+            if section["metadata_duration_label"] or section["metadata_participants_label"]:
                 dl_items = ""
-                if duration_label:
-                    dl_items += (f'<div class="inline"><dt><span title="{html.escape(duration_label)}">'
-                                 f'{html.escape(duration_label)}</span></dt>'
-                                 f'<dd>{html.escape(duration_value)}</dd></div>')
-                if participants_label:
-                    dl_items += (f'<div class="inline"><dt><span title="{html.escape(participants_label)}">'
-                                 f'{html.escape(participants_label)}</span></dt>'
-                                 f'<dd>{html.escape(participants_value)}</dd></div>')
+                if section["metadata_duration_label"]:
+                    dl_items += f'<div class="inline"><dt><span title="{html.escape(section["metadata_duration_label"])}">{html.escape(section["metadata_duration_label"])}</span></dt><dd>{html.escape(section["metadata_duration_value"])}</dd></div>'
+                if section["metadata_participants_label"]:
+                    dl_items += f'<div class="inline"><dt><span title="{html.escape(section["metadata_participants_label"])}">{html.escape(section["metadata_participants_label"])}</span></dt><dd>{html.escape(section["metadata_participants_value"])}</dd></div>'
                 dl_block = f'<dl>{dl_items}</dl>'
-
-            inner_html = (
-                f'<div class="exe-text-template"><div class="textIdeviceContent">'
-                f'<div class="exe-text-activity"><div>{dl_block}{xml_content}</div></div>'
-                f'</div></div>'
-            )
-            
-            json_props = json.dumps({
-                "ideviceId": section["component_id"],
-                "textInfoDurationInput": duration_value,
-                "textInfoDurationTextInput": duration_label or "Duración",
-                "textInfoParticipantsInput": participants_value,
-                "textInfoParticipantsTextInput": participants_label or "Agrupamiento",
-                "textTextarea": xml_content,
-                "textFeedbackInput": "Mostra la retroacció",
-                "textFeedbackTextarea": ""
-            })
 
             xml += f"""                <odePagStructure>
                     <odePageId>{page.id}</odePageId>
                     <odeBlockId>{section["block_id"]}</odeBlockId>
-                    <blockName>{block_name}</blockName>
+                    <blockName>{html.escape(section["title"]) if section["title"] else " "}</blockName>
                     <iconName>{icon}</iconName>
                     <odePagStructureOrder>{j}</odePagStructureOrder>
                     <odePagStructureProperties>
@@ -724,8 +664,17 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
                             <odeBlockId>{section["block_id"]}</odeBlockId>
                             <odeIdeviceId>{section["component_id"]}</odeIdeviceId>
                             <odeIdeviceTypeName>text</odeIdeviceTypeName>
-                            <htmlView>{html.escape(inner_html)}</htmlView>
-                            <jsonProperties>{html.escape(json_props)}</jsonProperties>
+                            <htmlView>{html.escape(f'<div class="exe-text-template"><div class="textIdeviceContent"><div class="exe-text-activity"><div>{dl_block}{xml_content}</div></div></div></div>')}</htmlView>
+                            <jsonProperties>{html.escape(json.dumps({
+                                "ideviceId": section["component_id"],
+                                "textInfoDurationInput": section["metadata_duration_value"],
+                                "textInfoDurationTextInput": section["metadata_duration_label"] or "Duración",
+                                "textInfoParticipantsInput": section["metadata_participants_value"],
+                                "textInfoParticipantsTextInput": section["metadata_participants_label"] or "Agrupamiento",
+                                "textTextarea": xml_content,
+                                "textFeedbackInput": "Mostra la retroacció",
+                                "textFeedbackTextarea": ""
+                            }))}</jsonProperties>
                             <odeComponentsOrder>1</odeComponentsOrder>
                             <odeComponentsProperties>
                                 <odeComponentsProperty><key>visibility</key><value>true</value></odeComponentsProperty>
@@ -746,41 +695,27 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
 
 def create_exelearning_package(pages, output_root, target_update, doc_metadata=None, theme_path=None, theme_name="base"):
     """Creates the folder structure and generates all HTML files. Optimized for speed."""
-
-    # If a custom theme is provided, copy it over the template theme
     if theme_path and theme_path.is_dir():
         shutil.copytree(theme_path, output_root / "theme", dirs_exist_ok=True)
 
-    # 1. Pre-parse template and cache common elements
-    with open(TEMPLATE_DIR / "index.html", "r", encoding="utf-8") as f:
-        soup_template = BeautifulSoup(f.read(), "lxml")
+    soup_template = BeautifulSoup((TEMPLATE_DIR / "index.html").read_text(encoding="utf-8"), "lxml")
     
     package_title_tag = soup_template.find("h1", class_="package-title")
-    package_title_template = package_title_tag.get_text() if package_title_tag else "Proyecto eXeLearning"
-    
-    # Priority: Metadata > Template Header > Default
     if doc_metadata and "pp_title" in doc_metadata:
         package_title = doc_metadata["pp_title"]
-        if package_title_tag:
-            package_title_tag.string = package_title
+        if package_title_tag: package_title_tag.string = package_title
     else:
-        package_title = package_title_template
+        package_title = package_title_tag.get_text() if package_title_tag else "Proyecto eXeLearning"
 
-    # 1.1 Inject Lightbox assets into template head
     if soup_template.head:
-        # Use {REL_PREFIX} so the path processing loop handles it correctly for subpages
-        lb_css = soup_template.new_tag("link", rel="stylesheet", **{"type": "text/css", "href": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.css"})
-        lb_js = soup_template.new_tag("script", **{"type": "text/javascript", "src": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.js"})
-        soup_template.head.append(lb_css)
-        soup_template.head.append(lb_js)
+        soup_template.head.append(soup_template.new_tag("link", rel="stylesheet", **{"type": "text/css", "href": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.css"}))
+        soup_template.head.append(soup_template.new_tag("script", **{"type": "text/javascript", "src": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.js"}))
 
-    # Pre-parse all sections into soup once
     for page in pages:
         for section in page.sections:
             section["soup"] = parse_html_fragment(section["content"])
 
-    # Pre-generate the auto-reload script
-    reload_script_html = f"""
+    reload_script_soup = parse_html_fragment(f"""
     <script>
         window.lastUpdate = window.lastUpdate || {int(target_update * 1000)};
         setInterval(async () => {{
@@ -793,21 +728,13 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
             }} catch (e) {{}}
         }}, 500);
     </script>
-    """
-    reload_script_soup = parse_html_fragment(reload_script_html)
+    """)
 
-    # 2. Generate pages and prepare for parallel write
     write_tasks = []
-    
-    # Pre-generate base nav without active classes for faster page generation
-    base_nav_raw = generate_site_nav(pages)
-
     for page in pages:
         page_soup = copy.deepcopy(soup_template)
-        
         if page_soup.title: page_soup.title.string = f"{page.title} | {package_title}"
-        page_title_h2 = page_soup.find("h2", class_="page-title")
-        if page_title_h2: page_title_h2.string = page.title
+        if page_soup.find("h2", class_="page-title"): page_soup.find("h2", class_="page-title").string = page.title
             
         nav_placeholder = page_soup.find("nav", id="siteNav")
         content_placeholder = page_soup.find("div", class_="page-content")
@@ -815,18 +742,11 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
         if content_placeholder:
             for article in content_placeholder.find_all("article"): article.decompose()
             for section in page.sections:
-                article_tag = page_soup.new_tag("article", **{"class": "box", "id": section["block_id"]})
-                if not section["title"]:
-                    article_tag["class"] = "box no-header"
-                else:
+                article_tag = page_soup.new_tag("article", **{"class": "box" if section["title"] else "box no-header", "id": section["block_id"]})
+                if section["title"]:
                     head = page_soup.new_tag("header", **{"class": "box-head"})
                     icon_div = page_soup.new_tag("div", **{"class": "box-icon exe-icon"})
-                    icon_name = "draw.png"
-                    if any(k in section["title"].lower() for k in ["reto", "objetivos", "mision"]): icon_name = "objectives.png"
-                    elif any(k in section["title"].lower() for k in ["lectura", "texto", "leer"]): icon_name = "reading.png"
-                    
-                    icon_img = page_soup.new_tag("img", **{"src": f"theme/icons/{icon_name}", "alt": ""})
-                    icon_div.append(icon_img)
+                    icon_div.append(page_soup.new_tag("img", **{"src": f"theme/icons/{'objectives.png' if any(k in section['title'].lower() for k in ['reto', 'objetivos', 'mision']) else 'reading.png' if any(k in section['title'].lower() for k in ['lectura', 'texto', 'leer']) else 'draw.png'}", "alt": ""}))
                     head.append(icon_div)
                     
                     title_h1 = page_soup.new_tag("h1", **{"class": "box-title"})
@@ -834,42 +754,26 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
                     head.append(title_h1)
                     
                     toggle_btn = page_soup.new_tag("button", **{"class": "box-toggle box-toggle-on", "title": "Ocultar/Mostrar contenido"})
-                    span_tag = page_soup.new_tag("span")
-                    span_tag.string = "Ocultar/Mostrar contenido"
-                    toggle_btn.append(span_tag)
+                    toggle_btn.append(page_soup.new_tag("span", string="Ocultar/Mostrar contenido"))
                     head.append(toggle_btn)
                     article_tag.append(head)
                 
                 box_content = page_soup.new_tag("div", **{"class": "box-content"})
-                
-                # Create the complex eXeLearning iDevice structure
-                idevice_node = page_soup.new_tag("div", **{
-                    "id": section["component_id"],
-                    "class": "idevice_node text loaded",
-                    "data-idevice-path": "idevices/text/",
-                    "data-idevice-type": "text",
-                    "data-idevice-component-type": "json"
-                })
-                
+                idevice_node = page_soup.new_tag("div", **{"id": section["component_id"], "class": "idevice_node text loaded", "data-idevice-path": "idevices/text/", "data-idevice-type": "text", "data-idevice-component-type": "json"})
                 inner_template = page_soup.new_tag("div", **{"class": "exe-text-template"})
                 text_content = page_soup.new_tag("div", **{"class": "textIdeviceContent"})
                 activity_wrapper = page_soup.new_tag("div", **{"class": "exe-text-activity"})
                 inner_div = page_soup.new_tag("div")
-                
                 inner_div.extend(copy.deepcopy(section["soup"]).contents)
                 activity_wrapper.append(inner_div)
                 text_content.append(activity_wrapper)
                 inner_template.append(text_content)
                 idevice_node.append(inner_template)
-                
                 box_content.append(idevice_node)
                 article_tag.append(box_content)
                 content_placeholder.append(article_tag)
 
-        # Update relative paths and nav
         prefix = "" if page.filename == "index.html" else "../"
-        
-        # Link and Image path processing (must happen for ALL pages to resolve {REL_PREFIX})
         for tag in page_soup.find_all(["link", "script", "img", "a"], recursive=True):
             for attr in ["href", "src"]:
                 if tag.has_attr(attr):
@@ -880,18 +784,10 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
                         tag[attr] = prefix + val
 
         if nav_placeholder:
-            # 1. Set current page as active
-            page_nav_html = base_nav_raw.replace(f"[[ACTIVE_{page.id}]]", "active")
-            # 2. Clear all other placeholders and set prefix
+            page_nav_html = generate_site_nav(pages).replace(f"[[ACTIVE_{page.id}]]", "active").replace("{REL_PREFIX}", prefix)
             page_nav_html = re.sub(r"\[\[ACTIVE_[\w-]+\]\]", "", page_nav_html)
-            page_nav_html = page_nav_html.replace("{REL_PREFIX}", prefix)
-            
             nav_soup = BeautifulSoup(page_nav_html, "lxml")
-            if nav_soup.body:
-                # Replace with the first element inside body (the <nav> itself)
-                nav_placeholder.replace_with(nav_soup.body.next_element)
-            else:
-                nav_placeholder.replace_with(nav_soup)
+            nav_placeholder.replace_with(nav_soup.body.next_element if nav_soup.body else nav_soup)
 
         if page_soup.body:
             page_soup.body.append(copy.deepcopy(reload_script_soup))
@@ -899,11 +795,7 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
         output_path = (output_root if page.filename == "index.html" else output_root / "html") / page.filename
         write_tasks.append((output_path, str(page_soup)))
 
-    # 3. Generate content.xml and finalize
-    description_meta = soup_template.find("meta", attrs={"name": "description"})
-    desc_text = description_meta["content"] if description_meta else ""
-    content_xml = generate_content_xml(pages, package_title, desc_text, doc_metadata, theme_name)
-    write_tasks.append((output_root / "content.xml", content_xml))
+    write_tasks.append((output_root / "content.xml", generate_content_xml(pages, package_title, soup_template.find("meta", attrs={"name": "description"})["content"] if soup_template.find("meta", attrs={"name": "description"}) else "", doc_metadata, theme_name)))
 
     # Parallel write
     with ThreadPoolExecutor() as executor:
@@ -939,14 +831,11 @@ def run_conversion(docx_path, input_dir, output_root):
         # 3. Create package (HTML injection + Disk writing)
         t0 = time.time()
         create_exelearning_package(pages, output_root, target_update, doc_metadata, theme_path, theme_name)
-        t_package = time.time() - t0
-        
         # 4. ONLY NOW update the global status so the browser reloads
         global LAST_UPDATE
         LAST_UPDATE = target_update
         
-        duration = time.time() - start_time
-        print(f"✅ Conversión completada en {duration:.2f}s (Ext: {t_extract:.2f}s, Pkg: {t_package:.2f}s)")
+        print(f"✅ Conversión completada en {time.time() - start_time:.2f}s (Ext: {t_extract:.2f}s, Pkg: {time.time() - t0:.2f}s)")
     except Exception as e:
         print(f"❌ Error en conversión: {e}")
         import traceback
