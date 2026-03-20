@@ -21,40 +21,26 @@ from tkinter import filedialog
 from flask import Flask, send_from_directory, jsonify, send_file
 from flask_cors import CORS
 import logging
+import sys
 
 # Silence Flask logging
+import flask.cli
+flask.cli.show_server_banner = lambda *args: None
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # --- GLOBALS ---
 LAST_UPDATE = time.time()
-CURRENT_OUT_PATH = None
-
-# Detect best available parser
-try:
-    import lxml
-    BEST_PARSER = "lxml"
-except ImportError:
-    BEST_PARSER = "html.parser"
-
-import sys
 
 # --- CONFIGURATION & PATHS ---
 def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller."""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = Path(sys._MEIPASS)
-    except Exception:
-        base_path = Path(__file__).resolve().parent
-
+    """Get absolute path to resource, works for dev and for PyInstaller. PyInstaller creates a temp folder and stores path in _MEIPASS"""
+    try: base_path = Path(sys._MEIPASS)
+    except Exception: base_path = Path(__file__).resolve().parent
     return base_path / relative_path
 
-BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = resource_path("template")
 CURRENT_OUT_PATH = None
-INPUT_DIR = BASE_DIR / "input"
-OUTPUT_ROOT = BASE_DIR / "output"
 
 # Document-level metadata keys (lowercase) -> content.xml property keys
 DOC_METADATA_KEYS = {
@@ -75,27 +61,10 @@ LANGUAGE_MAP = {
     "valencià": "va", "valenciano": "va", "catalán": "ca", "català": "ca",
     "castellano": "es", "español": "es", "spanish": "es",
     "english": "en", "inglés": "en", "anglès": "en",
-    "français": "fr", "francés": "fr", "french": "fr",
-    "português": "pt", "portugués": "pt",
-    "deutsch": "de", "alemán": "de", "german": "de",
-    "italiano": "it", "italian": "it",
-    "galego": "gl", "gallego": "gl",
-    "euskara": "eu", "vasco": "eu", "euskera": "eu",
 }
-MAIN_DOCX = INPUT_DIR / "exelearning.docx"
-CONTENT_DIR = OUTPUT_ROOT / "content"
 
-def slugify(text):
-    """Converts a string to a URL-friendly slug."""
-    text = normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()
-    text = re.sub(r'[^\w\s-]', '', text).strip()
-    return re.sub(r'[-\s]+', '-', text)
-
-def generate_id():
-    """Generates a unique eXeLearning ID: timestamp + 6 random uppercase chars."""
-    now = datetime.now().strftime("%Y%m%d%H%M%S")
-    suffix = ''.join(random.choices(string.ascii_uppercase, k=6))
-    return f"{now}{suffix}"
+def slugify(text): return re.sub(r'[-\s]+', '-', re.sub(r'[^\w\s-]', '', normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()).strip())
+def generate_id(): return f"{datetime.now().strftime('%Y%m%d%H%M%S')}{''.join(random.choices(string.ascii_uppercase, k=6))}"
 
 def extract_theme_name(theme_path):
     """Extracts theme name from config.xml in the theme folder."""
@@ -332,8 +301,15 @@ def process_content_resources(soup, output_root, section_id):
     return soup
 
 def parse_html_fragment(html_str):
-    """Fast parsing of HTML fragments."""
-    return BeautifulSoup(html_str, BEST_PARSER)
+    """Fast parsing of HTML fragments without adding html/body tags."""
+    soup = BeautifulSoup(html_str, "lxml")
+    if soup.body:
+        # Return a new soup containing only the body contents
+        new_soup = BeautifulSoup("", "lxml")
+        for content in soup.body.contents:
+            new_soup.append(copy.deepcopy(content))
+        return new_soup
+    return soup
 
 def extract_pages_from_docx(docx_path, input_dir, output_root):
     """Extracts content from docx. Uses a temp copy to bypass Word locks."""
@@ -389,7 +365,7 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
             try: os.remove(temp_docx)
             except: pass
     
-    soup = BeautifulSoup(full_html, BEST_PARSER)
+    soup = BeautifulSoup(full_html, "lxml")
     process_lightboxes(soup)
     
     pages = []
@@ -414,7 +390,7 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
     def flush_section():
         if not current_page or not section_elements: return
         # Combine elements and process links once per section
-        section_soup = BeautifulSoup("", BEST_PARSER)
+        section_soup = BeautifulSoup("", "lxml")
         for el in section_elements:
             section_soup.append(copy.deepcopy(el))
         
@@ -771,18 +747,13 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
 def create_exelearning_package(pages, output_root, target_update, doc_metadata=None, theme_path=None, theme_name="base"):
     """Creates the folder structure and generates all HTML files. Optimized for speed."""
 
-    # Remove this check, as template directory will always exist
-    if not TEMPLATE_DIR.exists():
-        print(f"Error: Template directory 'template' not found at {TEMPLATE_DIR}")
-        return
-
     # If a custom theme is provided, copy it over the template theme
     if theme_path and theme_path.is_dir():
         shutil.copytree(theme_path, output_root / "theme", dirs_exist_ok=True)
 
     # 1. Pre-parse template and cache common elements
     with open(TEMPLATE_DIR / "index.html", "r", encoding="utf-8") as f:
-        soup_template = BeautifulSoup(f.read(), BEST_PARSER)
+        soup_template = BeautifulSoup(f.read(), "lxml")
     
     package_title_tag = soup_template.find("h1", class_="package-title")
     package_title_template = package_title_tag.get_text() if package_title_tag else "Proyecto eXeLearning"
@@ -915,7 +886,12 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
             page_nav_html = re.sub(r"\[\[ACTIVE_[\w-]+\]\]", "", page_nav_html)
             page_nav_html = page_nav_html.replace("{REL_PREFIX}", prefix)
             
-            nav_placeholder.replace_with(BeautifulSoup(page_nav_html, BEST_PARSER))
+            nav_soup = BeautifulSoup(page_nav_html, "lxml")
+            if nav_soup.body:
+                # Replace with the first element inside body (the <nav> itself)
+                nav_placeholder.replace_with(nav_soup.body.next_element)
+            else:
+                nav_placeholder.replace_with(nav_soup)
 
         if page_soup.body:
             page_soup.body.append(copy.deepcopy(reload_script_soup))
@@ -937,56 +913,44 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
 def prepare_output(output_root):
     """Initializes output directory with template assets."""
     output_root.mkdir(parents=True, exist_ok=True)
-    # Remove this check, as template directory will always exist
-    if not TEMPLATE_DIR.exists():
-        print(f"[Warning] Template dir not found at {TEMPLATE_DIR}")
-        return
-
-    for folder in ["libs", "theme", "idevices", "content", "custom"]:
-        src = TEMPLATE_DIR / folder
-        dst = output_root / folder
-        if src.exists():
-            # Copy if missing or merge if exists
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-    
     (output_root / "html").mkdir(exist_ok=True)
+    for folder in ["libs", "theme", "idevices", "content", "custom"]:
+        shutil.copytree(TEMPLATE_DIR / folder, output_root / folder, dirs_exist_ok=True)
 
 def run_conversion(docx_path, input_dir, output_root):
     """Full conversion flow. Optimized and instrumented."""
-    # remove this check as it has been checked before function call
-    if docx_path.exists():
-        start_time = time.time()
-        timestamp_str = datetime.now().strftime("%H:%M:%S")
-        try:
-            # 1. Determine the target timestamp for THIS generation
-            target_update = time.time()
-            
-            # 2. Extract (Mammoth + BeautifulSoup extraction)
-            t0 = time.time()
-            pages, doc_metadata = extract_pages_from_docx(docx_path, input_dir, output_root)
-            t_extract = time.time() - t0
-            
-            # Detect custom theme
-            theme_path = docx_path.parent / "theme"
-            theme_name = "base"
-            if theme_path.is_dir():
-                theme_name = extract_theme_name(theme_path)
-            
-            # 3. Create package (HTML injection + Disk writing)
-            t0 = time.time()
-            create_exelearning_package(pages, output_root, target_update, doc_metadata, theme_path, theme_name)
-            t_package = time.time() - t0
-            
-            # 4. ONLY NOW update the global status so the browser reloads
-            global LAST_UPDATE
-            LAST_UPDATE = target_update
-            
-            duration = time.time() - start_time
-            print(f"[{timestamp_str}] ✅ Conversión completada en {duration:.2f}s (Ext: {t_extract:.2f}s, Pkg: {t_package:.2f}s)")
-        except Exception as e:
-            print(f"[{timestamp_str}] ❌ Error en conversión: {e}")
-            import traceback
-            traceback.print_exc()
+    start_time = time.time()
+    timestamp_str = datetime.now().strftime("%H:%M:%S")
+    try:
+        # 1. Determine the target timestamp for THIS generation
+        target_update = time.time()
+        
+        # 2. Extract (Mammoth + BeautifulSoup extraction)
+        t0 = time.time()
+        pages, doc_metadata = extract_pages_from_docx(docx_path, input_dir, output_root)
+        t_extract = time.time() - t0
+        
+        # Detect custom theme
+        theme_path = docx_path.parent / "theme"
+        theme_name = "base"
+        if theme_path.is_dir():
+            theme_name = extract_theme_name(theme_path)
+        
+        # 3. Create package (HTML injection + Disk writing)
+        t0 = time.time()
+        create_exelearning_package(pages, output_root, target_update, doc_metadata, theme_path, theme_name)
+        t_package = time.time() - t0
+        
+        # 4. ONLY NOW update the global status so the browser reloads
+        global LAST_UPDATE
+        LAST_UPDATE = target_update
+        
+        duration = time.time() - start_time
+        print(f"✅ Conversión completada en {duration:.2f}s (Ext: {t_extract:.2f}s, Pkg: {t_package:.2f}s)")
+    except Exception as e:
+        print(f"❌ Error en conversión: {e}")
+        import traceback
+        traceback.print_exc()
 
 # --- WEB SERVER ---
 app = Flask(__name__)
@@ -994,18 +958,10 @@ CORS(app)
 
 @app.route("/")
 def serve_index():
-    print(f"[Server] Request for / (index.html) in {CURRENT_OUT_PATH}")
-    if CURRENT_OUT_PATH is None:
-        return "Error: Output path not set", 500
-    index_path = CURRENT_OUT_PATH / "index.html"
-    if not index_path.exists():
-        print(f"[Server ERROR] index.html not found at {index_path}")
-        return f"Not Found: {index_path} does not exist. Please check if conversion worked.", 404
     return send_from_directory(CURRENT_OUT_PATH.resolve(), "index.html")
 
 @app.route("/html/<path:path>")
 def serve_html(path):
-    print(f"[Server] Request for /html/{path}")
     return send_from_directory((CURRENT_OUT_PATH / "html").resolve(), path)
 
 @app.route("/status")
@@ -1014,10 +970,7 @@ def get_status():
 
 @app.route("/elpx")
 def download_elpx():
-    """Zips the output directory and serves it as a .elpx file."""
-    if CURRENT_OUT_PATH is None or not CURRENT_OUT_PATH.exists():
-        return "Error: Output directory not found", 404
-        
+    """Zips the output directory and serves it as a .elpx file."""     
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(CURRENT_OUT_PATH):
@@ -1027,32 +980,14 @@ def download_elpx():
                 # Use relative path for the zip
                 arcname = file_path.relative_to(CURRENT_OUT_PATH)
                 zf.write(file_path, arcname)
-    
     memory_file.seek(0)
-    
-    # Use the name of the docx or folder for the filename
-    filename = "recurso.elpx"
-    if CURRENT_OUT_PATH:
-        # Parent of output is the work dir
-        name = CURRENT_OUT_PATH.parent.name
-        filename = f"{name}.elpx"
-
-    return send_file(
-        memory_file,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name=filename
-    )
+    return send_file(memory_file, mimetype='application/zip', as_attachment=True, download_name=f"{CURRENT_OUT_PATH.parent.name}.elpx")
 
 @app.route("/<path:path>")
 def serve_static(path):
-    # remove this check as CURRENT_OUT_PATH is set at the beginning
-    if CURRENT_OUT_PATH is None:
-        return "Error", 500
     full_path = CURRENT_OUT_PATH / path
     if full_path.exists():
         return send_from_directory(CURRENT_OUT_PATH.resolve(), path)
-    # print(f"[Server 404] Not found: {path}")
     return "Not Found", 404
 
 def start_flask():
@@ -1062,7 +997,6 @@ if __name__ == "__main__":
     # 1. Select Folder
     root = tk.Tk()
     root.withdraw()
-    print("Por favor, selecciona la carpeta de trabajo...")
     folder_selected = filedialog.askdirectory(title="Selecciona la carpeta que contiene exelearning.docx")
     root.destroy()
     
@@ -1071,18 +1005,15 @@ if __name__ == "__main__":
         exit()
 
     base_path = Path(folder_selected).resolve()
-    # Find the first .docx file (excluding temp files)
-    docx_files = [f for f in base_path.glob("*.docx") if not f.name.startswith("~$")]
-    
+    docx_files = [f for f in base_path.glob("*.docx") if not f.name.startswith("~$")]    
     if not docx_files:
         print(f"Error: No se encontró ningún archivo .docx en {base_path}")
         exit()
-        
+
     docx_file = docx_files[0]
     CURRENT_OUT_PATH = base_path / "output"
-    print(f"Directorio de trabajo: {base_path}")
-    print(f"Archivo detectado: {docx_file.name}")
-    print(f"Carpeta de salida: {CURRENT_OUT_PATH}")
+    print(f"📁 Directorio de trabajo: {base_path}")
+    print(f"📄 Archivo DOCX detectado: {docx_file.name}")
 
     # 2. Initial Conversion
     prepare_output(CURRENT_OUT_PATH)
@@ -1090,8 +1021,7 @@ if __name__ == "__main__":
 
     # 3. Start Server in Thread
     threading.Thread(target=start_flask, daemon=True).start()
-    print(f"\nServidor en vivo: http://localhost:5500")
-    print(f"Observando cambios en: {docx_file}")
+    print(f"\n🔥 Servidor en vivo: http://localhost:5500")
 
     # 4. Watch Loop
     try:
@@ -1108,7 +1038,7 @@ if __name__ == "__main__":
                 current_mtime = docx_file.stat().st_mtime
                 if current_mtime > last_mtime:
                     last_mtime = current_mtime
-                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 📝 Cambio detectado en {docx_file.name}")
+                    print(f"\n📝 Cambio detectado en {docx_file.name}")
                     run_conversion(docx_file, base_path, CURRENT_OUT_PATH)
             except (OSError, PermissionError):
                 # Word or OneDrive might have the file locked during save
