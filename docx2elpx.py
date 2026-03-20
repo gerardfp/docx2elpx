@@ -1,4 +1,5 @@
 import mammoth
+import mammoth.transforms
 import re
 import shutil
 import os
@@ -136,13 +137,46 @@ def process_links(soup, input_dir, output_root, section):
         yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+))', href)
         if yt_match:
             video_id = yt_match.group(2)
-            video_container = soup.new_tag("div", **{"class": "exe-video-wrapper exe-video-center exe-video-fixed", "style": "width:560px;"})
-            iframe = soup.new_tag("iframe", **{
-                "width": "560", "height": "315", "src": f"https://www.youtube.com/embed/{yt_match.group(2)}",
-                "frameborder": "0", "allowfullscreen": "allowfullscreen"
-            })
-            video_container.append(iframe)
-            a.replace_with(video_container)
+            embed_url = f"https://www.youtube.com/embed/{video_id}"
+            parent_p = a.find_parent('p')
+            style = parent_p.get("style", "") if parent_p else ""
+            is_centered = parent_p and "text-align: center" in style
+            
+            if is_centered:
+                # eXeLearning centered structure
+                span_src = soup.new_tag("span", **{"class": "external-iframe-src", "style": "display:none"})
+                a_src = soup.new_tag("a", href=embed_url)
+                a_src.string = embed_url
+                span_src.append(a_src)
+                
+                iframe = soup.new_tag("iframe", **{
+                    "width": "560", "height": "314", "src": embed_url,
+                    "allowfullscreen": "allowfullscreen", "class": "external-iframe"
+                })
+                
+                new_p = soup.new_tag("p", style=style)
+                new_p.append(span_src)
+                new_p.append(iframe)
+                
+                if parent_p:
+                    # If the paragraph has other content (besides our link), split it.
+                    # Simple check: is 'a' the only thing in parent_p?
+                    # We compare text content to be safe.
+                    if parent_p.get_text(strip=True) != a.get_text(strip=True):
+                        parent_p.insert_after(new_p)
+                        a.extract()
+                    else:
+                        parent_p.replace_with(new_p)
+                else:
+                    a.replace_with(new_p)
+            else:
+                video_container = soup.new_tag("div", **{"class": "exe-video-wrapper exe-video-center exe-video-fixed", "style": "width:560px;"})
+                iframe = soup.new_tag("iframe", **{
+                    "width": "560", "height": "315", "src": embed_url,
+                    "frameborder": "0", "allowfullscreen": "allowfullscreen"
+                })
+                video_container.append(iframe)
+                a.replace_with(video_container)
             continue
             
         # 2. Local Files
@@ -347,9 +381,23 @@ def load_docx_html(docx_path, output_root):
             img_attrs.update({"width": str(w), "height": str(h)})
         return img_attrs
 
+    def transform_paragraph(paragraph):
+        if hasattr(paragraph, "alignment") and paragraph.alignment:
+            alignment = paragraph.alignment
+            style_id = {"center": "Centered", "right": "RightAligned", "justify": "Justified"}.get(alignment)
+            if style_id:
+                return paragraph.copy(style_id=style_id, style_name=style_id)
+        return paragraph
+
+    style_map = """
+    p[style-name='Centered'] => p.mammoth-align-center
+    p[style-name='RightAligned'] => p.mammoth-align-right
+    p[style-name='Justified'] => p.mammoth-align-justify
+    """
     try:
         with open(temp_docx, "rb") as f:
-            return mammoth.convert_to_html(f, convert_image=mammoth.images.img_element(convert_image)).value
+            transform = mammoth.transforms.paragraph(transform_paragraph)
+            return mammoth.convert_to_html(f, convert_image=mammoth.images.img_element(convert_image), transform_document=transform, style_map=style_map).value
     finally:
         temp_docx.unlink(missing_ok=True)
 
@@ -363,6 +411,26 @@ def flush_section(ctx):
         section_soup.append(copy.deepcopy(el))
 
     section = ctx.current_page._current_section()
+
+    # Convert temporary alignment classes to inline styles
+    alignment_map = {
+        "mammoth-align-center": "center",
+        "mammoth-align-right": "right",
+        "mammoth-align-justify": "justify"
+    }
+    for cls, align in alignment_map.items():
+        for el in section_soup.find_all(class_=cls):
+            styles = [s.strip() for s in el.get("style", "").split(";") if s.strip()]
+            styles.append(f"text-align: {align}")
+            el["style"] = "; ".join(styles)
+            classes = el.get("class", [])
+            if cls in classes:
+                classes.remove(cls)
+            if not classes:
+                del el["class"]
+            else:
+                el["class"] = classes
+
     process_content_resources(section_soup, ctx.output_root, section)
     process_links(section_soup, ctx.input_dir, ctx.output_root, section)
     ctx.current_page.add_content(str(section_soup))
