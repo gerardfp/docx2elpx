@@ -15,6 +15,8 @@ import threading
 import copy
 import io
 import zipfile
+from dataclasses import dataclass, field
+from itertools import count
 
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
@@ -57,7 +59,6 @@ DOC_METADATA_KEYS = {
     "descripción": "pp_description",
 }
 
-# Language name -> ISO 639-1 code
 LANGUAGE_MAP = {
     "valencià": "va", "valenciano": "va", "catalán": "ca", "català": "ca",
     "castellano": "es", "español": "es", "spanish": "es",
@@ -66,6 +67,53 @@ LANGUAGE_MAP = {
 
 def slugify(text): return re.sub(r'[-\s]+', '-', re.sub(r'[^\w\s-]', '', normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()).strip())
 def generate_id(): return f"{datetime.now().strftime('%Y%m%d%H%M%S')}{''.join(random.choices(string.ascii_uppercase, k=6))}"
+
+@dataclass
+class Section:
+    block_id: str
+    component_id: str
+    title: str
+    content: str = ""
+    metadata: list = field(default_factory=list) # [{"label": str, "value": str}]
+    soup: any = None
+
+class SlugRegistry:
+    def __init__(self, reserved=None):
+        self.used = set()
+        self.reserved = reserved or set()
+
+    def generate(self, text):
+        base = slugify(text)
+        for i in count(0):
+            slug = base if i == 0 else f"{base}-{i}"
+            if slug not in self.used and (not self.used or slug not in self.reserved):
+                self.used.add(slug)
+                return slug
+
+@dataclass
+class Page:
+    title: str
+    level: int = 1
+    slug: str = ""
+    filename: str = ""
+    id: str = field(default_factory=generate_id)
+    sections: list[Section] = field(default_factory=list)
+    children: list["Page"] = field(default_factory=list)
+    parent: "Page | None" = None
+
+    def _current_section(self):
+        if not self.sections:
+            self.add_section("")
+        return self.sections[-1]
+
+    def add_section(self, title):
+        self.sections.append(Section(block_id=generate_id(), component_id=generate_id(), title=title))
+
+    def add_content(self, html_str):
+        self._current_section().content += html_str
+
+    def add_metadata(self, key, value):
+        self._current_section().metadata.append({"label": key, "value": value})
 
 def extract_theme_name(theme_path):
     """Extracts theme name from config.xml in the theme folder."""
@@ -80,64 +128,9 @@ def extract_theme_name(theme_path):
         pass
     return theme_path.name
 
-class Page:
-    def __init__(self, title, level=1, existing_slugs=None):
-        self.id = generate_id()
-        self.title = title
-        self.level = level
-        self.sections = [] # List of {"block_id": str, "component_id": str, "title": str, "content": str}
-        base_slug = slugify(title)
-        
-        # Ensure unique slug and avoid reserved names for sub-pages
-        self.slug = base_slug
-        reserved = {"index", "portada"}
-        
-        if existing_slugs is not None:
-            # If this is the first page, it will become index.html regardless of slug
-            # but we should still record its slug.
-            counter = 1
-            # For non-first pages, if slug is reserved or exists, append counter
-            # Actually, let's just make it unique.
-            while self.slug in existing_slugs or (len(existing_slugs) > 0 and self.slug in reserved):
-                self.slug = f"{base_slug}-{counter}"
-                counter += 1
-            existing_slugs.add(self.slug)
-
-        self.filename = f"{self.slug}.html" if self.slug != "index" and self.slug != "portada" else "index.html"
-        self.children = []
-        self.parent = None
-
-    def add_content(self, html_str):
-        if not self.sections:
-            self.add_section("")
-        self.sections[-1]["content"] += html_str
-
-    def add_metadata(self, key, value):
-        """Adds a {Key: Value} metadata pair to the current section."""
-        if not self.sections:
-            self.add_section("")
-        section = self.sections[-1]
-        if not section["metadata_duration_label"]:
-            section["metadata_duration_label"] = key
-            section["metadata_duration_value"] = value
-        elif not section["metadata_participants_label"]:
-            section["metadata_participants_label"] = key
-            section["metadata_participants_value"] = value
-
-    def add_section(self, title):
-        self.sections.append({
-            "block_id": generate_id(),
-            "component_id": generate_id(),
-            "title": title,
-            "content": "",
-            "metadata_duration_label": "",
-            "metadata_duration_value": "",
-            "metadata_participants_label": "",
-            "metadata_participants_value": "",
-        })
-
-def process_links(soup, input_dir, output_root, section_id):
+def process_links(soup, input_dir, output_root, section):
     """Processes links and YouTube embeds in-place on a BeautifulSoup object."""
+    section_id = section.component_id
     for a in soup.find_all('a', href=True):
         href = a['href']
         yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+))', href)
@@ -186,7 +179,7 @@ def extract_docx_image_dimensions(docx_path):
     return dims
 
 def process_lightboxes(soup):
-    """Finds {lightbox} tags and wraps the subsequent <img> in a lightbox link."""
+    """Wraps images in lightbox anchors where applicable."""
     link_counter = 0
     for text_node in soup.find_all(string=re.compile(r"\{lightbox\}")):
         # Get the text and parent before removal
@@ -233,8 +226,9 @@ def process_lightboxes(soup):
 
     return soup
 
-def process_content_resources(soup, output_root, section_id):
-    """Moves images from temp_media to section-specific folder and updates paths."""
+def process_content_resources(soup, output_root, section):
+    """Moves images from temp_media to section-specific folders and updates references."""
+    section_id = section.component_id
     temp_folder = output_root / "content" / "resources" / "temp_media"
     resource_folder = output_root / "content" / "resources" / section_id
     
@@ -302,8 +296,31 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
     temp_docx = output_root / "temp_watch.docx"
     max_retries = 5
     last_err = None
+
+class ParserContext:
+    def __init__(self, soup, input_dir, output_root):
+        self.soup = soup
+        self.input_dir = input_dir
+        self.output_root = output_root
+        self.pages = []
+        self.current_page = None
+        self.section_elements = []
+        self.doc_metadata = {}
+        self.collecting_description = False
+        self.collecting_fx = False
+        self.fx_elements = []
+        self.current_fx_class = "exe-accordion"
+        self.slug_registry = SlugRegistry({"index", "portada"})
+        self.is_default_page_active = True
+
+def load_docx_html(docx_path, output_root):
+    """Copies DOCX to temp, extracts images, and converts to HTML using Mammoth."""
+    temp_docx = output_root / "temp_watch.docx"
+    images_folder = output_root / "content" / "resources" / "temp_media"
+    images_folder.mkdir(parents=True, exist_ok=True)
     
-    for i in range(max_retries):
+    last_err = None
+    for _ in range(5):
         try:
             shutil.copy2(docx_path, temp_docx)
             break
@@ -311,228 +328,156 @@ def extract_pages_from_docx(docx_path, input_dir, output_root):
             last_err = e
             time.sleep(0.5)
     else:
-        print(f"[Error] Could not read {docx_path.name}: {last_err}")
-        return []
+        raise RuntimeError(f"No se pudo leer {docx_path}: {last_err}")
 
-    images_folder = output_root / "content" / "resources" / "temp_media"
-    images_folder.mkdir(parents=True, exist_ok=True)
-    
-    # 3. Extract dimensions from XML (Mammoth doesn't provide them)
     docx_dims = extract_docx_image_dimensions(temp_docx)
     image_count = 0
 
     def convert_image(image):
         nonlocal image_count
         image_count += 1
-        file_name = f"image_{image_count}.{image.content_type.partition("/")[2]}"
+        ext = image.content_type.partition("/")[2]
+        file_name = f"image_{image_count}.{ext}"
+        with image.open() as img_bytes, open(images_folder / file_name, "wb") as f:
+            f.write(img_bytes.read())
         
-        with image.open() as image_bytes:
-            with open(images_folder / file_name, "wb") as f:
-                f.write(image_bytes.read())
-        
-        # Use a placeholder for the prefix, similarly to REL_PREFIX
         img_attrs = {"src": f"{{REL_PREFIX}}content/resources/temp_media/{file_name}"}
-        
-        # Apply dimensions if we have them from the XML list
         if image_count <= len(docx_dims):
             w, h = docx_dims[image_count - 1]
-            img_attrs["width"] = str(w)
-            img_attrs["height"] = str(h)
-            
+            img_attrs.update({"width": str(w), "height": str(h)})
         return img_attrs
 
     try:
-        with open(temp_docx, "rb") as docx_file:
-            full_html = mammoth.convert_to_html(docx_file, convert_image=mammoth.images.img_element(convert_image)).value
+        with open(temp_docx, "rb") as f:
+            return mammoth.convert_to_html(f, convert_image=mammoth.images.img_element(convert_image)).value
     finally:
-        # consider this temp_docx.unlink(missing_ok=True)
-        if temp_docx.exists():
-            try: os.remove(temp_docx)
-            except: pass
-    
-    soup = BeautifulSoup(full_html, "lxml")
-    process_lightboxes(soup)
-    
-    pages = []
-    existing_slugs = set()
-    current_page = None
-    doc_metadata = {}  # Document-level metadata (before any page marker)
-    collecting_description = False  # For multi-line {descripción: ...}
-    collecting_accordion = False
-    accordion_elements = []
-    
-    page_marker_regex = re.compile(r"^(#+)\s*(.+)$")
-    section_marker_regex = re.compile(r"^%\s*(.+)$")
-    metadata_regex = re.compile(r"^\{(.+?):\s*(.+?)\}$")
-    # Multi-line metadata: opening line without closing brace
-    metadata_open_regex = re.compile(r"^\{(.+?):\s*(.+)$")
+        temp_docx.unlink(missing_ok=True)
 
-    section_elements = []
+def flush_section(ctx):
+    """Finalizes the current section by processing resources and links."""
+    if not ctx.current_page or not ctx.section_elements:
+        return
 
-    def flush_section():
-        if not current_page or not section_elements: return
-        # Combine elements and process links once per section
-        section_soup = BeautifulSoup("", "lxml")
-        for el in section_elements:
-            section_soup.append(copy.deepcopy(el))
-        
-        # Ensure at least one section exists to receive the content
-        if not current_page.sections:
-            current_page.add_section("")
-            
-        section_id = current_page.sections[-1]["component_id"]
-        process_content_resources(section_soup, output_root, section_id)
-        process_links(section_soup, input_dir, output_root, section_id)
-        current_page.add_content(str(section_soup))
-        section_elements.clear()
+    section_soup = BeautifulSoup("", "lxml")
+    for el in ctx.section_elements:
+        section_soup.append(copy.deepcopy(el))
 
-    # Pre-create a default page if the document starts without a marker
-    default_page = Page("Portada", 1)
-    default_page.filename = "index.html"
-    current_page = default_page
-    pages.append(current_page)
-    # We will remove it later if a real # marker is found as the first thing
-    is_default_page_active = True
+    section = ctx.current_page._current_section()
+    process_content_resources(section_soup, ctx.output_root, section)
+    process_links(section_soup, ctx.input_dir, ctx.output_root, section)
+    ctx.current_page.add_content(str(section_soup))
+    ctx.section_elements.clear()
 
-    # Ensure we iterate over the actual content elements
-    body = soup.find("body")
-    elements = body.contents if body else soup.contents
-    
-    for element in elements:
-        if not element.name:
-            if not current_page and not collecting_description:
-                continue  # Skip whitespace before any page
-            if collecting_accordion:
-                accordion_elements.append(element)
-            else:
-                section_elements.append(element)
+def handle_page(ctx, match):
+    """Processes a page marker (#)."""
+    if ctx.is_default_page_active and not any(s.content for s in ctx.pages[0].sections) and not ctx.section_elements:
+        ctx.pages.pop(0)
+
+    flush_section(ctx)
+    ctx.is_default_page_active = False
+    new_page = Page(title=match.group(2).strip(), level=len(match.group(1)))
+    new_page.slug = ctx.slug_registry.generate(new_page.title)
+    new_page.filename = "index.html" if new_page.slug in {"index", "portada"} or not ctx.pages else f"{new_page.slug}.html"
+    ctx.pages.append(new_page)
+    ctx.current_page = new_page
+
+def handle_section(ctx, match):
+    """Processes a section marker (%)."""
+    flush_section(ctx)
+    if ctx.current_page:
+        ctx.current_page.add_section(match.group(1).strip())
+
+def handle_metadata(ctx, key, value):
+    """Processes a metadata tag ({key: value})."""
+    prop_key = DOC_METADATA_KEYS.get(key.lower())
+    if prop_key and not ctx.is_default_page_active: # Logic changed: if we haven't found a real page yet, it's doc metadata
+        pass # Wait, actual logic was: if not current_page (but we always have a default page)
+
+    # Simplified logic: if no real page marker found, it's document metadata
+    if ctx.is_default_page_active:
+        if prop_key == "pp_lang":
+            value = LANGUAGE_MAP.get(value.lower(), value)
+        if prop_key: ctx.doc_metadata[prop_key] = value
+    elif ctx.current_page:
+        ctx.current_page.add_metadata(key, value)
+
+def parse_elements(ctx):
+    """Iterates through elements and dispatches to handlers."""
+    page_re = re.compile(r"^(#+)\s*(.+)$")
+    section_re = re.compile(r"^%\s*(.+)$")
+    metadata_re = re.compile(r"^\{(.+?):\s*(.+?)\}$")
+    fx_start_re = re.compile(r"\{(acorde[oó]n|pesta[ñn]as|paginaci[oó]n?|carrusel)\}", re.I)
+    fx_map = {"acordeon": "exe-accordion", "pestañas": "exe-tabs", "pestanas": "exe-tabs", "paginacion": "exe-paginated", "paginacio": "exe-paginated", "carrusel": "exe-carousel"}
+
+    elements = ctx.soup.body.contents if ctx.soup.body else ctx.soup.contents
+    for el in elements:
+        if not el.name:
+            (ctx.fx_elements if ctx.collecting_fx else ctx.section_elements).append(el)
             continue
             
-        text = element.get_text().strip()
-        
-        # Handle multi-line description continuation
-        if collecting_description:
-            # Check if this line ends the description with }
-            if text.endswith("}"):
-                doc_metadata["pp_description"] += "\n" + text[:-1].rstrip()
-                collecting_description = False
-            else:
-                doc_metadata["pp_description"] += "\n" + text
-            continue
-
-        # Handle FX blocks (accordion, tabs, pagination, carousel)
-        fx_map = {
-            "acordeon": "exe-accordion",
-            "pestañas": "exe-tabs",
-            "pestanas": "exe-tabs",
-            "paginacion": "exe-paginated",
-            "paginacio": "exe-paginated",
-            "carrusel": "exe-carousel"
-        }
-        
-        # Check for any FX starting tag
-        fx_start_match = re.search(r"\{(acorde[oó]n|pesta[ñn]as|paginaci[oó]n?|carrusel)\}", text, re.I)
-        if fx_start_match:
-            fx_type_raw = fx_start_match.group(1).lower()
-            # Normalize key for mapping (remove accents for the map key if needed)
-            norm_key = normalize('NFKD', fx_type_raw).encode('ASCII', 'ignore').decode('ASCII')
-            current_fx_class = fx_map.get(norm_key, fx_map.get(fx_type_raw, "exe-accordion"))
-            collecting_accordion = True # Reuse the flag for any FX
-            accordion_elements = []
-            continue
-        
-        # Unified {fin} tag
-        if re.search(r"\{fin(\s+\w+)?\}", text, re.I):
-            if collecting_accordion:
-                fx_class = current_fx_class if 'current_fx_class' in locals() else "exe-accordion"
-                fx_div = soup.new_tag("div", attrs={"class": f"exe-fx {fx_class}"})
-                for acc_el in accordion_elements:
-                    if not acc_el.name: 
-                        fx_div.append(copy.deepcopy(acc_el))
-                        continue
-                    el_text = acc_el.get_text().strip()
-                    if (acc_el.name.startswith("h") or acc_el.name == "p") and re.match(r"^>\s*>\s*.+", el_text):
-                        h2 = soup.new_tag("h2")
-                        h2.string = re.sub(r"^>\s*>\s*", "", el_text).strip()
+        text = el.get_text().strip()
+        if ctx.collecting_fx:
+            if re.search(r"\{fin(\s+\w+)?\}", text, re.I):
+                fx_div = ctx.soup.new_tag("div", attrs={"class": f"exe-fx {ctx.current_fx_class}"})
+                for acc_el in ctx.fx_elements:
+                    if acc_el.name and (acc_el.name.startswith("h") or acc_el.name == "p") and re.match(r"^>\s*>\s*.+", acc_el.get_text().strip()):
+                        h2 = ctx.soup.new_tag("h2")
+                        h2.string = re.sub(r"^>\s*>\s*", "", acc_el.get_text().strip()).strip()
                         fx_div.append(h2)
                     else:
                         fx_div.append(copy.deepcopy(acc_el))
-                section_elements.append(fx_div)
-                collecting_accordion = False
-                accordion_elements = []
+                ctx.section_elements.append(fx_div)
+                ctx.collecting_fx = False
+                ctx.fx_elements.clear()
+            else:
+                ctx.fx_elements.append(el)
             continue
-            
-        if collecting_accordion:
-            accordion_elements.append(element)
+
+        fx_match = fx_start_re.search(text)
+        if fx_match:
+            norm_key = normalize('NFKD', fx_match.group(1).lower()).encode('ASCII', 'ignore').decode('ASCII')
+            ctx.current_fx_class = fx_map.get(norm_key, "exe-accordion")
+            ctx.collecting_fx = True
+            ctx.fx_elements = []
             continue
+
+        if m := page_re.match(text):
+            handle_page(ctx, m)
+            continue
+        if m := section_re.match(text):
+            handle_section(ctx, m)
+            continue
+        if m := metadata_re.match(text):
+            handle_metadata(ctx, m.group(1).strip(), m.group(2).strip())
+            continue
+
+        if ctx.current_page:
+            ctx.section_elements.append(el)
+
+    flush_section(ctx)
+
+def extract_pages_from_docx(docx_path, input_dir, output_root):
+    """Main extraction coordinator."""
+    soup = BeautifulSoup(load_docx_html(docx_path, output_root), "lxml")
+    process_lightboxes(soup)
     
-        page_match = page_marker_regex.match(text)
-        if page_match:
-            # If this is the first real marker and we were using a default page with no content, 
-            # replace the default page.
-            if is_default_page_active and not any(s["content"] for s in default_page.sections) and not section_elements:
-                pages.remove(default_page)
-                existing_slugs.discard(default_page.slug)
-            
-            flush_section()
-            is_default_page_active = False # Found a real marker
-            new_page = Page(page_match.group(2).strip(), len(page_match.group(1)), existing_slugs)
-            if not pages: new_page.filename = "index.html"
-            pages.append(new_page)
-            current_page = new_page
-            continue
-            
-        section_match = section_marker_regex.match(text)
-        if section_match:
-            flush_section()
-            if current_page: current_page.add_section(section_match.group(1).strip())
-            continue
-
-        # Check for metadata (both document-level and section-level)
-        metadata_match = metadata_regex.match(text)
-        if metadata_match:
-            key = metadata_match.group(1).strip()
-            value = metadata_match.group(2).strip()
-            prop_key = DOC_METADATA_KEYS.get(key.lower())
-            
-            if prop_key and not current_page:
-                # Document-level metadata (before any # page marker)
-                if prop_key == "pp_lang":
-                    value = LANGUAGE_MAP.get(value.lower(), value)
-                doc_metadata[prop_key] = value
-            elif current_page:
-                # Section-level metadata (duration/participants)
-                current_page.add_metadata(key, value)
-            continue
-        
-        # Check for multi-line metadata opening (no closing brace)
-        if not current_page:
-            metadata_open_match = metadata_open_regex.match(text)
-            if metadata_open_match:
-                key = metadata_open_match.group(1).strip()
-                value = metadata_open_match.group(2).strip()
-                prop_key = DOC_METADATA_KEYS.get(key.lower())
-                if prop_key:
-                    doc_metadata[prop_key] = value
-                    collecting_description = True
-                continue
-            
-        if current_page:
-            section_elements.append(element)
-
-    flush_section()
-
-    # If the default page was created but never got content (only page markers), remove it
-    if is_default_page_active and not any(s["content"] for s in default_page.sections) and len(pages) > 1:
-        pages.remove(default_page)
-        
+    ctx = ParserContext(soup, input_dir, output_root)
+    # Default page
+    default_page = Page(title="Portada", level=1)
+    default_page.slug = ctx.slug_registry.generate(default_page.title)
+    default_page.filename = "index.html"
+    ctx.pages.append(default_page)
+    ctx.current_page = default_page
+    
+    parse_elements(ctx)
+    
     # Final cleanup of temp image folder
     temp_media = output_root / "content" / "resources" / "temp_media"
     if temp_media.exists():
         try: shutil.rmtree(temp_media)
         except: pass
 
-    return build_hierarchy(pages), doc_metadata
+    return build_hierarchy(ctx.pages), ctx.doc_metadata
 
 def build_hierarchy(flat_pages):
     """Reconstructs the parent-child relationships from flat list levels."""
@@ -628,26 +573,41 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
             <odePagStructures>
 """
         for j, section in enumerate(page.sections, 1):
-            icon = "objectives" if any(k in (section["title"] or "").lower() for k in ["reto", "objetivos", "mision"]) else ""
+            icon = "objectives" if any(k in (section.title or "").lower() for k in ["reto", "objetivos", "mision"]) else ""
             
             # Prepare content for XML: transform resource paths to {{context_path}}
-            xml_content = section["content"].replace("{REL_PREFIX}content/resources/", f"{{{{context_path}}}}/")
-            xml_content = xml_content.replace(f"content/resources/{section['component_id']}/", f"{{{{context_path}}}}/{section['component_id']}/")
+            xml_content = section.content.replace("{REL_PREFIX}content/resources/", f"{{{{context_path}}}}/")
+            xml_content = xml_content.replace(f"content/resources/{section.component_id}/", f"{{{{context_path}}}}/{section.component_id}/")
 
             # Build metadata <dl> block if present
             dl_block = ""
-            if section["metadata_duration_label"] or section["metadata_participants_label"]:
+            if section.metadata:
                 dl_items = ""
-                if section["metadata_duration_label"]:
-                    dl_items += f'<div class="inline"><dt><span title="{html.escape(section["metadata_duration_label"])}">{html.escape(section["metadata_duration_label"])}</span></dt><dd>{html.escape(section["metadata_duration_value"])}</dd></div>'
-                if section["metadata_participants_label"]:
-                    dl_items += f'<div class="inline"><dt><span title="{html.escape(section["metadata_participants_label"])}">{html.escape(section["metadata_participants_label"])}</span></dt><dd>{html.escape(section["metadata_participants_value"])}</dd></div>'
+                for item in section.metadata:
+                    label = html.escape(item["label"])
+                    value = html.escape(item["value"])
+                    dl_items += f'<div class="inline"><dt><span title="{label}">{label}</span></dt><dd>{value}</dd></div>'
                 dl_block = f'<dl>{dl_items}</dl>'
+
+            # Build metadata map for JSON compatibility
+            metadata_map = {item["label"].lower(): item["value"] for item in section.metadata}
+            json_props = {
+                "ideviceId": section.component_id,
+                "textTextarea": xml_content,
+                "textFeedbackInput": "Mostra la retroacció",
+                "textFeedbackTextarea": ""
+            }
+            if section.metadata:
+                json_props["textInfoDurationInput"] = section.metadata[0]["value"]
+                json_props["textInfoDurationTextInput"] = section.metadata[0]["label"]
+            if len(section.metadata) > 1:
+                json_props["textInfoParticipantsInput"] = section.metadata[1]["value"]
+                json_props["textInfoParticipantsTextInput"] = section.metadata[1]["label"]
 
             xml += f"""                <odePagStructure>
                     <odePageId>{page.id}</odePageId>
-                    <odeBlockId>{section["block_id"]}</odeBlockId>
-                    <blockName>{html.escape(section["title"]) if section["title"] else " "}</blockName>
+                    <odeBlockId>{section.block_id}</odeBlockId>
+                    <blockName>{html.escape(section.title) if section.title else " "}</blockName>
                     <iconName>{icon}</iconName>
                     <odePagStructureOrder>{j}</odePagStructureOrder>
                     <odePagStructureProperties>
@@ -661,20 +621,11 @@ def generate_content_xml(pages, package_title, description="", doc_metadata=None
                     <odeComponents>
                         <odeComponent>
                             <odePageId>{page.id}</odePageId>
-                            <odeBlockId>{section["block_id"]}</odeBlockId>
-                            <odeIdeviceId>{section["component_id"]}</odeIdeviceId>
+                            <odeBlockId>{section.block_id}</odeBlockId>
+                            <odeIdeviceId>{section.component_id}</odeIdeviceId>
                             <odeIdeviceTypeName>text</odeIdeviceTypeName>
                             <htmlView>{html.escape(f'<div class="exe-text-template"><div class="textIdeviceContent"><div class="exe-text-activity"><div>{dl_block}{xml_content}</div></div></div></div>')}</htmlView>
-                            <jsonProperties>{html.escape(json.dumps({
-                                "ideviceId": section["component_id"],
-                                "textInfoDurationInput": section["metadata_duration_value"],
-                                "textInfoDurationTextInput": section["metadata_duration_label"] or "Duración",
-                                "textInfoParticipantsInput": section["metadata_participants_value"],
-                                "textInfoParticipantsTextInput": section["metadata_participants_label"] or "Agrupamiento",
-                                "textTextarea": xml_content,
-                                "textFeedbackInput": "Mostra la retroacció",
-                                "textFeedbackTextarea": ""
-                            }))}</jsonProperties>
+                            <jsonProperties>{html.escape(json.dumps(json_props))}</jsonProperties>
                             <odeComponentsOrder>1</odeComponentsOrder>
                             <odeComponentsProperties>
                                 <odeComponentsProperty><key>visibility</key><value>true</value></odeComponentsProperty>
@@ -713,7 +664,7 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
 
     for page in pages:
         for section in page.sections:
-            section["soup"] = parse_html_fragment(section["content"])
+            section.soup = parse_html_fragment(section.content)
 
     reload_script_soup = parse_html_fragment(f"""
     <script>
@@ -742,15 +693,15 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
         if content_placeholder:
             for article in content_placeholder.find_all("article"): article.decompose()
             for section in page.sections:
-                article_tag = page_soup.new_tag("article", **{"class": "box" if section["title"] else "box no-header", "id": section["block_id"]})
-                if section["title"]:
+                article_tag = page_soup.new_tag("article", **{"class": "box" if section.title else "box no-header", "id": section.block_id})
+                if section.title:
                     head = page_soup.new_tag("header", **{"class": "box-head"})
                     icon_div = page_soup.new_tag("div", **{"class": "box-icon exe-icon"})
-                    icon_div.append(page_soup.new_tag("img", **{"src": f"theme/icons/{'objectives.png' if any(k in section['title'].lower() for k in ['reto', 'objetivos', 'mision']) else 'reading.png' if any(k in section['title'].lower() for k in ['lectura', 'texto', 'leer']) else 'draw.png'}", "alt": ""}))
+                    icon_div.append(page_soup.new_tag("img", **{"src": f"theme/icons/{'objectives.png' if any(k in section.title.lower() for k in ['reto', 'objetivos', 'mision']) else 'reading.png' if any(k in section.title.lower() for k in ['lectura', 'texto', 'leer']) else 'draw.png'}", "alt": ""}))
                     head.append(icon_div)
                     
                     title_h1 = page_soup.new_tag("h1", **{"class": "box-title"})
-                    title_h1.string = section["title"]
+                    title_h1.string = section.title
                     head.append(title_h1)
                     
                     toggle_btn = page_soup.new_tag("button", **{"class": "box-toggle box-toggle-on", "title": "Ocultar/Mostrar contenido"})
@@ -759,12 +710,12 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
                     article_tag.append(head)
                 
                 box_content = page_soup.new_tag("div", **{"class": "box-content"})
-                idevice_node = page_soup.new_tag("div", **{"id": section["component_id"], "class": "idevice_node text loaded", "data-idevice-path": "idevices/text/", "data-idevice-type": "text", "data-idevice-component-type": "json"})
+                idevice_node = page_soup.new_tag("div", **{"id": section.component_id, "class": "idevice_node text loaded", "data-idevice-path": "idevices/text/", "data-idevice-type": "text", "data-idevice-component-type": "json"})
                 inner_template = page_soup.new_tag("div", **{"class": "exe-text-template"})
                 text_content = page_soup.new_tag("div", **{"class": "textIdeviceContent"})
                 activity_wrapper = page_soup.new_tag("div", **{"class": "exe-text-activity"})
                 inner_div = page_soup.new_tag("div")
-                inner_div.extend(copy.deepcopy(section["soup"]).contents)
+                inner_div.extend(copy.deepcopy(section.soup).contents)
                 activity_wrapper.append(inner_div)
                 text_content.append(activity_wrapper)
                 inner_template.append(text_content)
