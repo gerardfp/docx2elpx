@@ -726,9 +726,10 @@ def create_exelearning_package(pages, output_root, target_update, doc_metadata=N
     else:
         package_title = package_title_tag.get_text() if package_title_tag else "Proyecto eXeLearning"
 
-    if soup_template.head:
-        soup_template.head.append(soup_template.new_tag("link", rel="stylesheet", **{"type": "text/css", "href": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.css"}))
-        soup_template.head.append(soup_template.new_tag("script", **{"type": "text/javascript", "src": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.js"}))
+    # commented as it has been included in the template
+    # if soup_template.head:
+    #     soup_template.head.append(soup_template.new_tag("link", rel="stylesheet", **{"type": "text/css", "href": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.css"}))
+    #     soup_template.head.append(soup_template.new_tag("script", **{"type": "text/javascript", "src": "{REL_PREFIX}libs/exe_lightbox/exe_lightbox.js"}))
 
     for page in pages:
         for section in page.sections:
