@@ -77,3 +77,8 @@ Contenido 2 del acordeón
   </article>
 </main>
 ```
+
+
+# build dist
+
+    uv run pyinstaller doc2elpx.spec

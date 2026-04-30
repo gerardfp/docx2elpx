@@ -827,7 +827,11 @@ def prepare_output(output_root):
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "html").mkdir(exist_ok=True)
     for folder in ["libs", "theme", "idevices", "content", "custom"]:
-        shutil.copytree(TEMPLATE_DIR / folder, output_root / folder, dirs_exist_ok=True)
+        src_folder = TEMPLATE_DIR / folder
+        if src_folder.exists():
+            shutil.copytree(src_folder, output_root / folder, dirs_exist_ok=True)
+        else:
+            (output_root / folder).mkdir(exist_ok=True)
 
 def run_conversion(docx_path, input_dir, output_root):
     """Full conversion flow. Optimized and instrumented."""

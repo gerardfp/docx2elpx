@@ -5,7 +5,7 @@ a = Analysis(
     ['docx2elpx.py'],
     pathex=[],
     binaries=[],
-    datas=[('sda_example', 'sda_example')],
+    datas=[('template', 'template')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['sda_example\\libs\\favicon.ico'],
+    icon=['template\\libs\\favicon.ico'],
 )
