@@ -1,11 +1,4 @@
-# Generación de ODE (Objeto Digital Educativo) 
-```
-Objeto Digital Educativo
-└── páginas
-└── actividades (iDevices)
-└── recursos multimedia
-└── metadatos
-```
+# Tutorial
 
 ## Metadatos
 ```
@@ -18,7 +11,7 @@ Objeto Digital Educativo
 En los metadatos}
 ```
 
-# Elementos
+## Elementos
 
 * Páginas / subpáginas
 ```
@@ -62,7 +55,23 @@ Contenido 2 del acordeón
 {fin}
 ```
 
+* Enlaces a documentos y multimedia
 
+```
+* Documentos: Inserta un enlace en Word (Ctrl+K) y escribe el nombre del archivo (ej. archivo.pdf) como destino. El archivo debe estar en la misma carpeta que el .docx.
+* YouTube: Inserta un enlace a un vídeo de YouTube y se convertirá automáticamente en un reproductor incrustado.
+```
+
+
+# Dev
+## Generación de ODE (Objeto Digital Educativo) 
+```
+Objeto Digital Educativo
+└── páginas
+└── actividades (iDevices)
+└── recursos multimedia
+└── metadatos
+```
 
 # Estructura HTML
 
@@ -79,6 +88,6 @@ Contenido 2 del acordeón
 ```
 
 
-# build dist
+## build dist
 
     uv run pyinstaller doc2elpx.spec
