@@ -212,6 +212,123 @@ def extract_docx_image_dimensions(docx_path):
         print(f"[Warning] Error extracting dimensions from XML: {e}")
     return dims
 
+def parse_markdown_link(text):
+    """Parses 'Text [URL]' into (text, url)."""
+    match = re.search(r"^(.*?)\s*\[(https?://.*?)\]$", text.strip())
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return text.strip(), None
+
+def process_figures(soup):
+    """Processes images followed by pseudo-JSON metadata into eXeLearning figures."""
+    # Pattern to match the pseudo-JSON block
+    # It looks for { titulo: ... } with optional fields
+    figure_re = re.compile(r"\{\s*titulo:\s*(.*?)\s*(?:autor:\s*(.*?)\s*)?(?:alt:\s*(.*?)\s*)?(?:pie:\s*(.*?)\s*)?(?:ancho:\s*(\d+)\s*)?(?:alto:\s*(\d+)\s*)?\}", re.S | re.I)
+
+    for text_node in soup.find_all(string=figure_re):
+        parent = text_node.parent
+        match = figure_re.search(text_node)
+        if not match:
+            continue
+
+        # Extract fields
+        title_raw = match.group(1) or ""
+        author_raw = match.group(2) or ""
+        alt_raw = match.group(3) or ""
+        caption_raw = match.group(4) or ""
+        width = match.group(5)
+        height = match.group(6)
+
+        # Parse links
+        title_text, title_url = parse_markdown_link(title_raw)
+        author_text, author_url = parse_markdown_link(author_raw)
+        caption_text, caption_url = parse_markdown_link(caption_raw)
+
+        # Find the image preceding this metadata block
+        # Usually it's in a paragraph before the one containing this text, or in the same paragraph
+        img = None
+        
+        # 1. Look in the same paragraph or previous elements
+        prev = parent.find_previous("img")
+        if prev:
+            img = prev
+
+        if not img:
+            continue
+
+        # Build the eXeLearning figure structure
+        figure = soup.new_tag("figure", attrs={"class": "exe-figure position-center"})
+        if width:
+            figure["style"] = f"width: {width}px;"
+
+        # Header (Title)
+        if title_text:
+            header_div = soup.new_tag("div", attrs={"class": "figcaption header"})
+            strong = soup.new_tag("strong")
+            strong.string = title_text
+            header_div.append(strong)
+            figure.append(header_div)
+
+        # Image tag
+        new_img = copy.deepcopy(img)
+        if width: new_img["width"] = width
+        if height: new_img["height"] = height
+        if alt_raw: new_img["alt"] = alt_raw
+        if title_text: new_img["title"] = title_text
+        figure.append(new_img)
+
+        # Caption (Author, Title/Pie, License)
+        figcaption = soup.new_tag("figcaption", attrs={"class": "figcaption"})
+        
+        # Author
+        if author_text:
+            if author_url:
+                author_a = soup.new_tag("a", href=author_url, attrs={"class": "author", "target": "_blank", "rel": "noopener"})
+                author_a.string = author_text
+                figcaption.append(author_a)
+            else:
+                span_author = soup.new_tag("span", attrs={"class": "author"})
+                span_author.string = author_text
+                figcaption.append(span_author)
+            figcaption.append(". ")
+
+        # Title/Pie
+        if caption_text:
+            if caption_url:
+                caption_a = soup.new_tag("a", href=caption_url, attrs={"class": "title", "target": "_blank", "rel": "noopener"})
+                em = soup.new_tag("em")
+                em.string = caption_text
+                caption_a.append(em)
+                figcaption.append(caption_a)
+            else:
+                em = soup.new_tag("em")
+                em.string = caption_text
+                figcaption.append(em)
+            figcaption.append(" ")
+
+        # License (Always CC BY as requested)
+        license_span = soup.new_tag("span", attrs={"class": "license"})
+        sep1 = soup.new_tag("span", attrs={"class": "sep"})
+        sep1.string = "("
+        license_span.append(sep1)
+        
+        license_a = soup.new_tag("a", href="http://creativecommons.org/licenses/", attrs={"class": "license", "target": "_blank", "rel": "noopener"})
+        license_a.string = "CC BY"
+        license_span.append(license_a)
+        
+        sep2 = soup.new_tag("span", attrs={"class": "sep"})
+        sep2.string = ")"
+        license_span.append(sep2)
+        
+        figcaption.append(license_span)
+        figure.append(figcaption)
+
+        # Replace the original metadata text and the original image
+        text_node.replace_with("") # Clear the metadata text
+        img.replace_with(figure) # Replace the image with the whole figure
+
+    return soup
+
 def process_lightboxes(soup):
     """Wraps images in lightbox anchors where applicable."""
     link_counter = 0
@@ -527,6 +644,7 @@ def parse_elements(ctx):
 def extract_pages_from_docx(docx_path, input_dir, output_root):
     """Main extraction coordinator."""
     soup = BeautifulSoup(load_docx_html(docx_path, output_root), "lxml")
+    process_figures(soup)
     process_lightboxes(soup)
     
     ctx = ParserContext(soup, input_dir, output_root)

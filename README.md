@@ -46,6 +46,8 @@ Imagen
 
 * Acordeón, Pestañas, Paginación, Carrusel
 
+cambia {acordeon} per {pestañas}, {paginación} o {carrusel}
+
 ```
 {acordeon}
 >> Titulo 1 del acordeón
@@ -62,6 +64,20 @@ Contenido 2 del acordeón
 * YouTube: Inserta un enlace a un vídeo de YouTube y se convertirá automáticamente en un reproductor incrustado.
 ```
 
+* Imágenes
+
+Justo a continuación de la imagen ha de venir el bloque de metadatos:
+
+```
+{
+   titulo: Título de la imagen
+   autor: Autor de la imagen [https://enlace.al.autor.de.la.imagen]
+   alt: Descripción alternativa de la imagen
+   pie: Texto del pie de imagen [https://enlace.del.pie.de.imagen]
+   ancho: 1280
+   alto: 720
+}
+```
 
 # Dev
 ## Generación de ODE (Objeto Digital Educativo) 
