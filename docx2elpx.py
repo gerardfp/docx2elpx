@@ -221,38 +221,49 @@ def parse_markdown_link(text):
 
 def process_figures(soup):
     """Processes images followed by pseudo-JSON metadata into eXeLearning figures."""
-    # Pattern to match the pseudo-JSON block
-    # It looks for { titulo: ... } with optional fields
-    figure_re = re.compile(r"\{\s*titulo:\s*(.*?)\s*(?:autor:\s*(.*?)\s*)?(?:alt:\s*(.*?)\s*)?(?:pie:\s*(.*?)\s*)?(?:ancho:\s*(\d+)\s*)?(?:alto:\s*(\d+)\s*)?\}", re.S | re.I)
-
-    for text_node in soup.find_all(string=figure_re):
-        parent = text_node.parent
-        match = figure_re.search(text_node)
-        if not match:
+    # We need to find the start of a metadata block '{' and potentially collect multiple paragraphs
+    for p in soup.find_all("p"):
+        text = p.get_text().strip()
+        if not text.startswith("{"):
             continue
 
-        # Extract fields
-        title_raw = match.group(1) or ""
-        author_raw = match.group(2) or ""
-        alt_raw = match.group(3) or ""
-        caption_raw = match.group(4) or ""
-        width = match.group(5)
-        height = match.group(6)
+        # Start collecting paragraphs until we find '}'
+        metadata_paragraphs = []
+        curr = p
+        content = ""
+        while curr and curr.name == "p":
+            curr_text = curr.get_text().strip()
+            content += curr_text + "\n"
+            metadata_paragraphs.append(curr)
+            if "}" in curr_text:
+                break
+            curr = curr.find_next_sibling()
+
+        # Check if it looks like our metadata block (must have at least one valid key)
+        valid_keys = ["titulo", "autor", "alt", "pie", "ancho", "alto"]
+        if not any(f"{key}:" in content.lower() for key in valid_keys):
+            continue
+
+        # Extract fields using individual regexes
+        def get_field(key, pattern=r"(.*?)$"):
+            m = re.search(fr"{key}:\s*{pattern}", content, re.I | re.M)
+            return m.group(1).strip() if m else None
+
+        title_raw = get_field("titulo")
+        author_raw = get_field("autor")
+        alt_raw = get_field("alt")
+        caption_raw = get_field("pie")
+        width = get_field("ancho", r"(\d+)")
+        height = get_field("alto", r"(\d+)")
 
         # Parse links
-        title_text, title_url = parse_markdown_link(title_raw)
-        author_text, author_url = parse_markdown_link(author_raw)
-        caption_text, caption_url = parse_markdown_link(caption_raw)
+        title_text, title_url = parse_markdown_link(title_raw) if title_raw else (None, None)
+        author_text, author_url = parse_markdown_link(author_raw) if author_raw else (None, None)
+        caption_text, caption_url = parse_markdown_link(caption_raw) if caption_raw else (None, None)
 
-        # Find the image preceding this metadata block
-        # Usually it's in a paragraph before the one containing this text, or in the same paragraph
-        img = None
-        
-        # 1. Look in the same paragraph or previous elements
-        prev = parent.find_previous("img")
-        if prev:
-            img = prev
-
+        # Find the image preceding the first paragraph of the metadata
+        # We look for the nearest <img> tag before our first paragraph 'p'
+        img = p.find_previous("img")
         if not img:
             continue
 
@@ -306,7 +317,7 @@ def process_figures(soup):
                 figcaption.append(em)
             figcaption.append(" ")
 
-        # License (Always CC BY as requested)
+        # License (Always CC BY)
         license_span = soup.new_tag("span", attrs={"class": "license"})
         sep1 = soup.new_tag("span", attrs={"class": "sep"})
         sep1.string = "("
@@ -323,9 +334,12 @@ def process_figures(soup):
         figcaption.append(license_span)
         figure.append(figcaption)
 
-        # Replace the original metadata text and the original image
-        text_node.replace_with("") # Clear the metadata text
-        img.replace_with(figure) # Replace the image with the whole figure
+        # 1. Remove all paragraphs that contained the metadata
+        for mp in metadata_paragraphs:
+            mp.extract()
+
+        # 2. Replace the original image with the whole figure
+        img.replace_with(figure)
 
     return soup
 

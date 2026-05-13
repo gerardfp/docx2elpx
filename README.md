@@ -64,20 +64,23 @@ Contenido 2 del acordeón
 * YouTube: Inserta un enlace a un vídeo de YouTube y se convertirá automáticamente en un reproductor incrustado.
 ```
 
-* Imágenes
+* Figura con metadatos
 
-Justo a continuación de la imagen ha de venir el bloque de metadatos:
+Justo a continuación de la imagen se puede incluir el bloque de metadatos con el siguiente formato:
 
-```
+```text
 {
-   titulo: Título de la imagen
-   autor: Autor de la imagen [https://enlace.al.autor.de.la.imagen]
-   alt: Descripción alternativa de la imagen
-   pie: Texto del pie de imagen [https://enlace.del.pie.de.imagen]
+   titulo: Título de la imagen [https://enlace.opcional.al.documento]
+   autor: Autor de la imagen [https://enlace.al.autor]
+   alt: Descripción alternativa (accesibilidad)
+   pie: Texto del pie [https://enlace.del.pie]
    ancho: 1280
    alto: 720
 }
 ```
+*Nota: La licencia se establece automáticamente como CC BY.*
+Todos los campos son opcionales.
+Los enlaces dentro de "titulo", "autor" y "pie" también son opcionales: `Texto [URL]`.
 
 # Dev
 ## Generación de ODE (Objeto Digital Educativo) 
